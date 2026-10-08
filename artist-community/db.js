@@ -215,7 +215,7 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         // Remove directly identifying audit targets before dropping the account.
         await client.query(`DELETE FROM community_audit_log
           WHERE target_id=$1 OR target_id IN
-            (SELECT id::text FROM community_songs WHERE owner_id=$1)`, [userId])
+            (SELECT id::text FROM community_songs WHERE owner_id=$2)`, [userId, userId])
         const { rowCount } = await client.query(
           'DELETE FROM community_users WHERE id=$1', [userId],
         )
