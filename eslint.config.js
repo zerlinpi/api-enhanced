@@ -80,7 +80,7 @@ module.exports = defineConfig([
       ],
     },
   },
-  globalIgnores(['**/public/']),
+  globalIgnores(['**/public/', 'artist-community/**']),
   {
     files: ['**/*.ts'],
     languageOptions: {
