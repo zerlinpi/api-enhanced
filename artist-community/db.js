@@ -159,6 +159,10 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
     async addAudit(action, targetId) {
       await q('INSERT INTO community_audit_log(action,target_id) VALUES ($1,$2)', [action, targetId])
     },
+    async ready() {
+      const { rows } = await q('SELECT 1 AS ok')
+      return rows[0]?.ok === 1
+    },
     async close() { await pool.end() },
   }
 }
