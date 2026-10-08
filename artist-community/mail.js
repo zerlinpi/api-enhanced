@@ -44,7 +44,7 @@ function createMailerFromEnv(env = process.env) {
   }
   const link = (kind, token) => {
     const address = new URL('/', parsed)
-    address.searchParams.set(kind, token)
+    address.hash = new URLSearchParams({ [kind]: token }).toString()
     return address.toString()
   }
   return {
