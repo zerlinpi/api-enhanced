@@ -102,3 +102,59 @@ test('PostgreSQL export scope and transactional account deletion', { skip: !proc
   // Deletion frees the artist ID and email while retaining unrelated accounts.
   assert.ok(await db.findUserByEmail(listener + '@example.invalid'))
 })
+
+
+test('PostgreSQL moderation reports persist and hidden songs are excluded', { skip: !process.env.DATABASE_URL }, async t => {
+  const db = await createPgStore()
+  t.after(() => db.close())
+  const artistId = crypto.randomUUID()
+  const listenerId = crypto.randomUUID()
+  await db.createUser({ id: artistId, email: artistId + '@example.invalid', passwordHash: 'fake-hash' })
+  await db.createUser({ id: listenerId, email: listenerId + '@example.invalid', passwordHash: 'fake-hash' })
+  const workId = crypto.randomUUID()
+  const uniqueId = String(Date.now()) + crypto.randomInt(100000, 999999)
+  await db.createProfile(artistId, { artistId: uniqueId, artistName: 'Content Moderator Test', proofCode: 'MOD-PROOF' })
+  await db.createSong({ id: workId, ownerId: artistId, neteaseSongId: uniqueId + '1',
+    title: 'Moderation Music', artist: 'Content Moderator Test',
+    url: 'https://music.163.com/song?id=' + uniqueId + '1' })
+  assert.equal(await db.submitSongReport({
+    id: crypto.randomUUID(), songId: workId, reporterId: listenerId, reason: 'spam', details: '',
+  }), null, 'pending songs are not reportable')
+  await db.approveProfile(artistId)
+  await db.approveSong(workId)
+  assert.equal(await db.submitSongReport({
+    id: crypto.randomUUID(), songId: workId, reporterId: artistId, reason: 'spam', details: '',
+  }), null, 'authors cannot report their own work')
+  const report = await db.submitSongReport({ id: crypto.randomUUID(), songId: workId,
+    reporterId: listenerId, reason: 'copyright', details: 'Need proof of ownership' })
+  assert.equal(report.reason, 'copyright')
+  assert.equal(await db.submitSongReport({ id: crypto.randomUUID(), songId: workId,
+    reporterId: listenerId, reason: 'spam', details: 'repeat' }), null)
+  assert.equal((await db.listPendingReports()).some(r => r.id === report.id), true)
+  assert.equal((await db.recommendSongs(listenerId)).some(s => s.id === workId), true)
+  assert.equal((await db.moderateSong(workId, 'hide')).status, 'hidden')
+  assert.equal(await db.moderateSong(workId, 'hide'), null)
+  assert.equal((await db.listSongs()).some(s => s.id === workId), false)
+  assert.equal((await db.recommendSongs(listenerId)).some(s => s.id === workId), false)
+  assert.equal(await db.recordVisit(workId, listenerId), null)
+  assert.equal((await db.listPendingReports()).some(r => r.id === report.id), false)
+  assert.equal((await db.listHiddenSongs()).some(s => s.id === workId), true)
+  assert.equal((await db.moderateSong(workId, 'restore')).status, 'approved')
+  assert.equal(await db.moderateSong(workId, 'restore'), null)
+  assert.equal((await db.listSongs()).some(s => s.id === workId), true)
+
+  const work2 = crypto.randomUUID()
+  await db.createSong({ id: work2, ownerId: artistId, neteaseSongId: uniqueId + '2',
+    title: 'Follow-up Song', artist: 'Content Moderator Test',
+    url: 'https://music.163.com/song?id=' + uniqueId + '2' })
+  await db.approveSong(work2)
+  const dismiss = await db.submitSongReport({ id: crypto.randomUUID(), songId: work2,
+    reporterId: listenerId, reason: 'other', details: 'review later' })
+  assert.equal((await db.dismissReport(dismiss.id)).status, 'dismissed')
+  assert.equal(await db.dismissReport(dismiss.id), null)
+  assert.equal((await db.listPendingReports()).some(r => r.id === dismiss.id), false)
+  // Reports follow user and song deletion through foreign keys.
+  await db.deleteAccount(artistId)
+  assert.equal((await db.listHiddenSongs()).some(s => s.id === workId), false)
+  assert.equal((await db.listPendingReports()).some(r => r.songId === workId), false)
+})
