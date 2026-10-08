@@ -4,7 +4,7 @@ const assert = require('node:assert/strict')
 const { createServer, hashPassword, verifyPassword } = require('./server')
 
 function fakeStore() {
-  const users = new Map(), sessions = new Map(), profiles = new Map(), songs = new Map(), visits = new Set(), tokens = new Map()
+  const users = new Map(), sessions = new Map(), profiles = new Map(), songs = new Map(), visits = new Set(), tokens = new Map(), reports = new Map()
   return {
     async createUser(u) { if (users.has(u.email)) { const e = Error(); e.code = '23505'; throw e } users.set(u.email, u); return u },
     async findUserByEmail(email) { return users.get(email) },
@@ -23,6 +23,38 @@ function fakeStore() {
     },
     async ready() { return true },
     async addAudit() {},
+    async submitSongReport(report) {
+      const song = songs.get(report.songId)
+      if (!song || song.status !== 'approved' || song.ownerId === report.reporterId ||
+          [...reports.values()].some(r => r.songId === report.songId && r.reporterId === report.reporterId)) return null
+      const entry = { ...report, status: 'pending', title: song.title, artist: song.artist, url: song.url, songStatus: song.status }
+      reports.set(report.id, entry)
+      return { id: report.id, songId: report.songId, reason: report.reason, status: 'pending' }
+    },
+    async listPendingReports() {
+      return [...reports.values()].filter(report => report.status === 'pending').map(report => ({
+        ...report, songStatus: songs.get(report.songId)?.status || null,
+      }))
+    },
+    async listHiddenSongs() { return [...songs.values()].filter(song => song.status === 'hidden') },
+    async moderateSong(id, action) {
+      const song = songs.get(id)
+      if (action === 'hide' && song?.status === 'approved') {
+        song.status = 'hidden'
+        for (const report of reports.values()) if (report.songId === id && report.status === 'pending') report.status = 'resolved'
+      } else if (action === 'restore' && song?.status === 'hidden' &&
+          profiles.get(song.ownerId)?.status === 'verified') {
+        song.status = 'approved'
+      } else return null
+      return { id, status: song.status }
+    },
+    async dismissReport(id) {
+      const report = reports.get(id)
+      if (!report || report.status !== 'pending') return null
+      report.status = 'dismissed'
+      return { id, status: 'dismissed' }
+    },
+
     async exportAccount(id) {
       const u = [...users.values()].find(user => user.id === id)
       if (!u) return null
@@ -266,4 +298,78 @@ test('account export, revoke all sessions and permanent deletion are private', a
   assert.equal((await response.json()).visitedSongs.length, 0)
   // A deleted user's unique email address is no longer reserved.
   assert.equal((await post('/api/auth/register', { email: 'artist@example.com', password })).status, 201)
+})
+
+
+test('verified listeners can report works; admins can dismiss, hide and restore', async t => {
+  const adminToken = 'unit-test-admin-secret-at-least-thirty-two-characters'
+  const verification = new Map()
+  const server = createServer({ store: fakeStore(), adminToken, mailer: {
+    async sendVerification(email, token) { verification.set(email, token) },
+    async sendPasswordReset() {},
+  } })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const base = 'http://127.0.0.1:' + server.address().port
+  const post = (url, body = {}, cookie = '', admin = false) => fetch(base + url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Community-Request': '1',
+      Cookie: cookie, ...(admin ? { Authorization: 'Bearer ' + adminToken } : {}) },
+    body: JSON.stringify(body),
+  })
+  const get = (url, cookie = '', admin = false) => fetch(base + url, {
+    headers: { Cookie: cookie, ...(admin ? { Authorization: 'Bearer ' + adminToken } : {}) },
+  })
+  const password = 'secure-password-for-testing'
+  async function member(email, verify = true) {
+    assert.equal((await post('/api/auth/register', { email, password })).status, 201)
+    if (verify) assert.equal((await post('/api/auth/verify-email', { token: verification.get(email) })).status, 200)
+    const r = await post('/api/auth/login', { email, password })
+    assert.equal(r.status, 200)
+    return { cookie: r.headers.get('set-cookie').split(';')[0], id: (await r.json()).user.id }
+  }
+  const artist = await member('owner+moderation@example.com')
+  const listener = await member('listener+moderation@example.com')
+  const unverified = await member('unverified+moderation@example.com', false)
+  assert.equal((await post('/api/profile', {
+    artistName: 'Moderation Artist', url: 'https://music.163.com/artist?id=739293',
+  }, artist.cookie)).status, 201)
+  const create = await post('/api/songs', { title: 'Moderation Song', url: 'https://music.163.com/song?id=739291' }, artist.cookie)
+  assert.equal(create.status, 201)
+  const song = (await create.json()).song
+  assert.equal((await post('/api/admin/profiles/' + artist.id + '/approve', {}, '', true)).status, 200)
+  assert.equal((await post('/api/admin/songs/' + song.id + '/approve', {}, '', true)).status, 200)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'spam' })).status, 401)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'spam' }, unverified.cookie)).status, 403)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'spam' }, artist.cookie)).status, 409)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'invalid' }, listener.cookie)).status, 400)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'copyright', details: 'ownership concern' }, listener.cookie)).status, 201)
+  assert.equal((await post('/api/songs/' + song.id + '/reports', { reason: 'copyright' }, listener.cookie)).status, 409)
+  assert.equal((await get('/api/admin/reports')).status, 503, 'without a token admin area should be inaccessible')
+  const adminReports = await get('/api/admin/reports', '', true)
+  assert.equal(adminReports.status, 200)
+  let queue = await adminReports.json()
+  assert.equal(queue.reports.length, 1)
+  assert.equal(queue.reports[0].details, 'ownership concern')
+  assert.equal((await post('/api/admin/songs/' + song.id + '/hide', {}, listener.cookie)).status, 503)
+  assert.equal((await post('/api/admin/songs/' + song.id + '/hide', {}, '', true)).status, 200)
+  assert.equal((await (await get('/api/songs')).json()).songs.length, 0, 'hidden song must vanish from public listing')
+  assert.equal((await (await get('/api/recommendations', listener.cookie)).json()).songs.length, 0, 'hidden song cannot be recommended')
+  queue = await (await get('/api/admin/reports', '', true)).json()
+  assert.equal(queue.reports.length, 0, 'reports are marked resolved on takedown')
+  assert.equal(queue.hiddenSongs.length, 1)
+  assert.equal((await post('/api/admin/songs/' + song.id + '/hide', {}, '', true)).status, 409)
+  assert.equal((await post('/api/songs/' + song.id + '/visits', {}, listener.cookie)).status, 404)
+  assert.equal((await post('/api/admin/songs/' + song.id + '/restore', {}, '', true)).status, 200)
+  assert.equal((await (await get('/api/songs')).json()).songs.length, 1)
+  assert.equal((await (await get('/api/recommendations', listener.cookie)).json()).songs.length, 1)
+  assert.equal((await post('/api/admin/songs/' + song.id + '/restore', {}, '', true)).status, 409)
+  // A second song exercises the independent report dismissal path.
+  const another = await post('/api/songs', { title: 'Another', url: 'https://music.163.com/song?id=739292' }, artist.cookie)
+  const otherId = (await another.json()).song.id
+  assert.equal((await post('/api/admin/songs/' + otherId + '/approve', {}, '', true)).status, 200)
+  const report = await post('/api/songs/' + otherId + '/reports', { reason: 'other' }, listener.cookie)
+  const reportId = (await report.json()).report.id
+  assert.equal((await post('/api/admin/reports/' + reportId + '/dismiss', {}, '', true)).status, 200)
+  assert.equal((await post('/api/admin/reports/' + reportId + '/dismiss', {}, '', true)).status, 404)
+  assert.equal((await (await get('/api/admin/reports', '', true)).json()).reports.length, 0)
 })
