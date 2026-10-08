@@ -14,6 +14,7 @@ function fakeStore() {
     async createProfile(id, profile) { const p = { ...profile, userId: id, status: 'pending' }; profiles.set(id, p); return p },
     async getProfile(id) { return profiles.get(id) },
     async createSong(s) { const song = { ...s, status: 'pending' }; songs.set(s.id, song); return song },
+    async recommendSongs(id) { return (await this.listSongs()).filter(s => s.ownerId !== id && !visits.has(s.id + ':' + id)) },
     async listMySongs(id) { return [...songs.values()].filter(s => s.ownerId === id) },
     async listSongs() { return [...songs.values()].filter(s => s.status === 'approved').map(s => ({ ...s, communityVisitors: [...visits].filter(v => v.startsWith(s.id + ':')).length })) },
     async recordVisit(id, user) {
@@ -67,10 +68,14 @@ test('signup, login, approval, counted visits and logout', async t => {
   assert.equal(r.status, 201)
   r = await post('/api/auth/login', { email: 'listener@example.com', password: 'very-long-password' })
   const cookie = r.headers.get('set-cookie').split(';')[0]
+  let feed = await fetch(base + '/api/recommendations', { headers: { Cookie: cookie } })
+  assert.equal((await feed.json()).songs.length, 1)
   for (const expected of [true, false]) {
     const result = await post('/api/songs/' + song.id + '/visits', {}, cookie)
     assert.equal((await result.json()).recorded, expected)
   }
+  feed = await fetch(base + '/api/recommendations', { headers: { Cookie: cookie } })
+  assert.equal((await feed.json()).songs.length, 0, 'seen songs leave the personal feed')
   const listing = (await (await get('/api/songs')).json()).songs[0]
   assert.equal(listing.communityVisitors, 1)
   assert.equal(listing.officialValidPlays, null)
