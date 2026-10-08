@@ -4,6 +4,22 @@ on:
   workflow_dispatch: # 手动触发
   push:
     branches: [main]
+    # Standalone community changes do not require rebuilding the upstream API
+    # binaries for Linux, Windows and macOS.
+    paths:
+      - app.js
+      - server.js
+      - generateConfig.js
+      - main.js
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - Dockerfile
+      - 'module/**'
+      - 'util/**'
+      - 'plugins/**'
+      - 'scripts/**'
+      - '.github/workflows/build-dev.yml'
 
 jobs:
   build:
