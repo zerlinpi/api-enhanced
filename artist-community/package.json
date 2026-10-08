@@ -1,0 +1,17 @@
+{
+  "name": "artist-discovery-community",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Independent, authenticated music discovery community",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "nodemailer": "^7.0.11"
+  }
+}

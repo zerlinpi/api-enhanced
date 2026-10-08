@@ -1,0 +1,9 @@
+# Use when another HTTPS reverse proxy already owns 80/443 on the server.
+# This keeps the application accessible only on the host loopback interface.
+services:
+  app:
+    ports:
+      - "127.0.0.1:3100:3100"
+  proxy:
+    profiles:
+      - bundled-caddy-disabled

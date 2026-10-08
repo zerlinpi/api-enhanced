@@ -1,0 +1,53 @@
+name: Artist Community Tests
+
+on:
+  pull_request:
+    paths:
+      - 'artist-community/**'
+      - '.github/workflows/artist-community-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'artist-community/**'
+
+jobs:
+  artist-community:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: community
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: artist_community
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U community -d artist_community"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://community:test-only-password@127.0.0.1:5432/artist_community
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install standalone app dependencies
+        run: npm install --prefix artist-community --ignore-scripts --no-audit --no-fund
+      - name: Check syntax
+        run: |
+          node --check artist-community/server.js
+          node --check artist-community/db.js
+          node --check artist-community/server.test.js
+          node --check artist-community/db.test.js
+      - name: Validate production Compose and backup syntax
+        run: |
+          docker compose --env-file artist-community/.env.production.example -f artist-community/docker-compose.prod.yml config --quiet
+          bash -n artist-community/backup.sh
+          bash -n artist-community/deploy/preflight.sh
+          bash -n artist-community/deploy/compose.sh
+          docker compose --env-file artist-community/.env.production.example -f artist-community/docker-compose.prod.yml -f artist-community/docker-compose.external-proxy.yml config --quiet
+      - name: Offline + PostgreSQL tests
+        run: npm test --prefix artist-community

@@ -49,3 +49,14 @@
 - **`docs:check` 校验的是 `public/docs/home.md`（docsify 站点）**，不是 README；脚本默认只处理该文件，换行会被统一为 `\n`、连续空行压缩到 2 行，PR 改动它后记得跑 `pnpm docs:format`。
 - **ESLint 9 flat config**：`eslint.config.js`，风格由 `eslint-plugin-prettier` 强制（2 空格缩进、单引号、分号、`endOfLine: auto`），并 `globalIgnores(['**/public/'])`——`public/` 下的前端页面不参与 lint。
 - **`pnpm-workspace.yaml` 是单包工作区**（`packages: ['.']`），并带 `allowBuilds`（core-js/es5-ext）与 `minimumReleaseAgeExclude` 白名单；改依赖安装行为时先看它。
+
+## Artist Community 独立 Web 子项目（`artist-community/`）
+
+- 该目录与根目录网易云 API 独立，`artist-community/package.json` 使用 npm，Node 20+；不要为了子项目改动主仓库发布版本号。
+- `node artist-community/server.js` 需要 PostgreSQL、MAIL_MODE 或 SMTP、PUBLIC_BASE_URL；`cd artist-community && npm test` 包含离线测试和在设置 DATABASE_URL 时进行的 PostgreSQL 集成测试。
+- `artist-community/schema.sql` 为可重复执行的基础表定义；生产阶段后续应添加版本化迁移，不要破坏旧账户数据。
+- 认证邮件通过 `mail.js`，数据库只保存一次性令牌 SHA-256；禁止把邮件链接、会话 Cookie、SMTP 密码、管理员令牌写入 Git 或生产日志。
+- `artist-community/admin.html` 为单管理员 Bearer Token 审核界面；正式生产还有 Caddy HTTP Basic Auth。音乐人身份必须人工核对公开主页，不等于网易云官方认证。
+- `official-metrics.js` 默认返回 unavailable/null；未经网易云正式授权前不得替换成未经许可的内部接口或伪造播放数据。
+- 部署模板：`artist-community/docker-compose.prod.yml` + `Caddyfile`；生产配置样例 `.env.production.example`；备份 `backup.sh`。
+- 每次修改本子项目应检查独立 GitHub Actions `artist-community-ci.yml`；不要将站内点击、访问量误当网易云有效播放。

@@ -1,0 +1,18 @@
+{$SITE_DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000"
+    X-Content-Type-Options nosniff
+    Referrer-Policy no-referrer
+  }
+  @admin path /admin /api/admin/*
+  handle @admin {
+    basic_auth {
+      {$ADMIN_BASIC_USER} {$ADMIN_BASIC_HASH}
+    }
+    reverse_proxy app:3100
+  }
+  handle {
+    reverse_proxy app:3100
+  }
+}
