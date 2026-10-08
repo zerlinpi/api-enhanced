@@ -46,5 +46,6 @@ jobs:
         run: |
           docker compose --env-file artist-community/.env.production.example -f artist-community/docker-compose.prod.yml config --quiet
           bash -n artist-community/backup.sh
+          bash -n artist-community/deploy/preflight.sh
       - name: Offline + PostgreSQL tests
         run: npm test --prefix artist-community
