@@ -63,6 +63,18 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         GROUP BY s.id ORDER BY s.created_at DESC LIMIT 100`)
       return rows
     },
+    async recommendSongs(userId) {
+      const { rows } = await q(`SELECT s.id,s.title,s.artist,s.url,s.created_at AS "createdAt",
+        count(v.user_id)::int AS "communityVisitors"
+        FROM community_songs s LEFT JOIN community_visits v ON v.song_id=s.id
+        WHERE s.status='approved' AND s.owner_id <> $1
+          AND NOT EXISTS (
+            SELECT 1 FROM community_visits seen
+            WHERE seen.song_id=s.id AND seen.user_id=$1
+          )
+        GROUP BY s.id ORDER BY count(v.user_id) ASC, s.created_at DESC LIMIT 40`, [userId])
+      return rows
+    },
     async listMySongs(userId) {
       const { rows } = await q(`SELECT id,title,artist,url,status,created_at AS "createdAt"
         FROM community_songs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 100`, [userId])
