@@ -11,3 +11,5 @@ anonymous_token
 .env
 IFLOW.md
 precompiled
+# Legacy artist-community MVP local data (do not commit user browsing records)
+.artist-community-data.json
