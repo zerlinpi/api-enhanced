@@ -186,6 +186,13 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       const user = await requireUser(req)
       return reply(200, { profile: await store.getProfile(user.id) })
     }
+    if (req.method === 'GET' && route === '/api/account/export') {
+      const user = await requireUser(req)
+      throttle(req, 'account-export', 8, user.id)
+      const data = await store.exportAccount(user.id)
+      if (!data) fail(404, '账户不存在')
+      return reply(200, data)
+    }
     if (req.method === 'GET' && route === '/api/my/songs') {
       const user = await requireUser(req)
       return reply(200, { songs: (await store.listMySongs(user.id)).map(publicSong) })
@@ -255,6 +262,27 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       await store.createSession(tokenHash(token), user.id, new Date(Date.now() + SESSION_MS))
       res.setHeader('Set-Cookie', sessionCookie(token))
       return reply(200, { user: safeUser(user) })
+    }
+    if (route === '/api/account/logout-all' || route === '/api/account/delete') {
+      const user = await requireUser(req)
+      throttle(req, 'account-security', 5, user.id)
+      const input = await bodyJson(req)
+      const password = input.password
+      if (typeof password !== 'string' || password.length > 128) fail(403, '密码验证失败')
+      const account = await store.findUserByEmail(user.email)
+      if (!account || account.id !== user.id || !(await verifyPassword(password, account.passwordHash))) {
+        fail(403, '密码验证失败')
+      }
+      if (route === '/api/account/logout-all') {
+        await store.revokeAllSessions(user.id)
+        res.setHeader('Set-Cookie', sessionCookie('', 0))
+        return reply(200, { ok: true, message: '所有设备已退出登录' })
+      }
+      if (input.confirmation !== 'DELETE') fail(400, '请输入 DELETE 确认永久注销')
+      const deleted = await store.deleteAccount(user.id)
+      if (!deleted) fail(404, '账户不存在')
+      res.setHeader('Set-Cookie', sessionCookie('', 0))
+      return reply(200, { ok: true, message: '账户及关联数据已从在线数据库删除' })
     }
     if (route === '/api/auth/logout') {
       const token = readCookie(req)
