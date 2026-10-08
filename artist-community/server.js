@@ -5,6 +5,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const { promisify } = require('node:util')
 const { createPgStore } = require('./db')
+const { createUnavailableMetricsProvider } = require('./official-metrics')
 
 const scrypt = promisify(crypto.scrypt)
 const PORT = Number(process.env.ARTIST_COMMUNITY_PORT || 3100)
@@ -30,7 +31,7 @@ async function verifyPassword(password, stored) {
   const actual = await scrypt(password, salt, 64)
   return crypto.timingSafeEqual(actual, Buffer.from(expected, 'hex'))
 }
-function safeUser(user) { return { id: user.id, email: user.email } }
+function safeUser(user) { return { id: user.id, email: user.email, emailVerified: Boolean(user.emailVerifiedAt) } }
 function publicSong(song) {
   return { ...song, officialValidPlays: null, officialTaskStatus: 'unavailable' }
 }
@@ -75,9 +76,25 @@ function guardMutation(req) {
     if (origin !== req.headers.host) fail(403, '禁止跨站请求')
   }
 }
-function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN } = {}) {
+function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN } = {}) {
   if (!store) throw new Error('store is required')
   const attempts = new Map()
+  async function sendAccountToken(user, purpose) {
+    if (!mailer) fail(503, '邮件服务尚未配置')
+    const token = crypto.randomBytes(32).toString('hex')
+    const duration = purpose === 'email_verification' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000
+    await store.saveAuthToken(user.id, purpose, tokenHash(token), new Date(Date.now() + duration))
+    if (purpose === 'email_verification') await mailer.sendVerification(user.email, token)
+    else await mailer.sendPasswordReset(user.email, token)
+  }
+  function validatedToken(value) {
+    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) fail(400, '链接无效或已过期')
+    return tokenHash(value)
+  }
+  function validatedPassword(password) {
+    if (typeof password !== 'string' || password.length < 12 || password.length > 128) fail(400, '密码必须为 12–128 个字符')
+    return password
+  }
   function throttle(req, action, limit) {
     const key = (req.socket.remoteAddress || '-') + ':' + action
     const now = Date.now()
@@ -110,6 +127,11 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify(data))
     }
+    if (req.method === 'GET' && route === '/admin') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(fs.readFileSync(path.join(__dirname, 'admin.html')))
+      return
+    }
     if (req.method === 'GET' && route === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(fs.readFileSync(path.join(__dirname, 'index.html')))
@@ -123,6 +145,10 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
     if (req.method === 'GET' && route === '/api/songs') {
       const songs = await store.listSongs()
       return reply(200, { songs: songs.map(publicSong) })
+    }
+    if (req.method === 'GET' && route === '/api/official/metrics') {
+      const user = await requireUser(req)
+      return reply(200, await metricsProvider.getMetrics({ userId: user.id, profile: await store.getProfile(user.id) }))
     }
     if (req.method === 'GET' && route === '/api/recommendations') {
       const user = await requireUser(req)
@@ -148,9 +174,46 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
       const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
       const password = input.password
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254) fail(400, '邮箱地址无效')
-      if (typeof password !== 'string' || password.length < 12 || password.length > 128) fail(400, '密码必须为 12–128 个字符')
+      validatedPassword(password)
+      if (!mailer) fail(503, '邮件服务尚未配置')
       const user = await store.createUser({ id: crypto.randomUUID(), email, passwordHash: await hashPassword(password) })
-      return reply(201, { user: safeUser(user), message: '注册成功，请登录' })
+      await sendAccountToken(user, 'email_verification')
+      return reply(201, { user: safeUser(user), message: '注册成功，请查收邮箱验证邮件后登录' })
+    }
+    if (route === '/api/auth/verify-email') {
+      throttle(req, 'email-verification', 20)
+      const input = await bodyJson(req)
+      const ok = await store.consumeAuthToken(validatedToken(input.token), 'email_verification')
+      if (!ok) fail(400, '验证链接无效或已过期')
+      return reply(200, { ok: true, message: '邮箱验证成功' })
+    }
+    if (route === '/api/auth/resend-verification') {
+      throttle(req, 'resend-verification', 3)
+      const user = await requireUser(req)
+      await bodyJson(req)
+      if (!user.emailVerifiedAt) await sendAccountToken(user, 'email_verification')
+      return reply(200, { ok: true, message: '如需验证，已发送新的验证邮件' })
+    }
+    if (route === '/api/auth/forgot-password') {
+      throttle(req, 'forgot-password', 5)
+      const input = await bodyJson(req)
+      const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
+      if (email.length > 254) fail(400, '邮箱格式无效')
+      const user = await store.findUserByEmail(email)
+      if (user) {
+        try { await sendAccountToken(user, 'password_reset') }
+        catch (error) { console.error('[artist-community] reset email delivery unavailable') }
+      }
+      return reply(200, { message: '如果邮箱已注册，密码重置链接会发送到对应邮箱' })
+    }
+    if (route === '/api/auth/reset-password') {
+      throttle(req, 'reset-password', 10)
+      const input = await bodyJson(req)
+      const passwordHash = await hashPassword(validatedPassword(input.password))
+      const ok = await store.consumeAuthToken(validatedToken(input.token), 'password_reset', passwordHash)
+      if (!ok) fail(400, '重置链接无效或已过期')
+      res.setHeader('Set-Cookie', sessionCookie('', 0))
+      return reply(200, { ok: true, message: '密码已重置，请重新登录' })
     }
     if (route === '/api/auth/login') {
       throttle(req, 'login', 10)
@@ -173,6 +236,7 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
     }
     if (route === '/api/profile') {
       const user = await requireUser(req)
+      if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
       throttle(req, 'profile', 5)
       const input = await bodyJson(req)
       const name = typeof input.artistName === 'string' ? input.artistName.trim() : ''
@@ -184,6 +248,7 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
     }
     if (route === '/api/songs') {
       const user = await requireUser(req)
+      if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
       throttle(req, 'songs', 20)
       const profile = await store.getProfile(user.id)
       if (!profile) fail(403, '请先绑定音乐人主页')
@@ -214,6 +279,7 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
       await bodyJson(req)
       const profile = await store.approveProfile(approveProfile[1])
       if (!profile) fail(404, '待审核音乐人不存在')
+      await store.addAudit('profile_approved', profile.userId)
       return reply(200, { profile })
     }
     const approveSong = /^\/api\/admin\/songs\/([0-9a-f-]{36})\/approve$/i.exec(route)
@@ -222,6 +288,7 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
       await bodyJson(req)
       const song = await store.approveSong(approveSong[1])
       if (!song) fail(409, '歌曲不存在、已审核或音乐人尚未认证')
+      await store.addAudit('song_approved', song.id)
       return reply(200, { song })
     }
     fail(404, '接口不存在')
@@ -239,7 +306,10 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
 }
 async function start() {
   const store = await createPgStore()
-  createServer({ store }).listen(PORT, () => console.log('Artist community: http://localhost:' + PORT))
+  const { createMailerFromEnv } = require('./mail')
+  const mailer = createMailerFromEnv()
+  const host = process.env.ARTIST_COMMUNITY_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1')
+  createServer({ store, mailer }).listen(PORT, host, () => console.log('Artist community ready on ' + host + ':' + PORT))
 }
 if (require.main === module) start().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { createServer, hashPassword, verifyPassword, SONG_RE, ARTIST_RE }
