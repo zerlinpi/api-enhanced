@@ -197,6 +197,13 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       const user = await requireUser(req)
       return reply(200, { songs: (await store.listMySongs(user.id)).map(publicSong) })
     }
+    if (req.method === 'GET' && route === '/api/admin/reports') {
+      authAdmin(req, adminToken)
+      return reply(200, {
+        reports: await store.listPendingReports(),
+        hiddenSongs: await store.listHiddenSongs(),
+      })
+    }
     if (req.method === 'GET' && route === '/api/admin/review') {
       authAdmin(req, adminToken)
       return reply(200, await store.reviewQueue())
@@ -319,6 +326,23 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       })
       return reply(201, { song: publicSong(song), notice: '作品已提交，等待人工审核后公开展示' })
     }
+    const reportMatch = /^\/api\/songs\/([0-9a-f-]{36})\/reports$/i.exec(route)
+    if (reportMatch) {
+      const user = await requireUser(req)
+      if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
+      throttle(req, 'song-report', 10, user.id)
+      const input = await bodyJson(req)
+      const reason = input.reason
+      const details = typeof input.details === 'string' ? input.details.trim() : ''
+      if (!['copyright','impersonation','spam','other'].includes(reason) || details.length > 500) {
+        fail(400, '请选择合法的举报原因，补充说明不能超过500字')
+      }
+      const result = await store.submitSongReport({
+        id: crypto.randomUUID(), songId: reportMatch[1], reporterId: user.id, reason, details,
+      })
+      if (!result) fail(409, '作品不可举报、是本人作品或已经提交过举报')
+      return reply(201, { report: result, message: '举报已收到，等待人工审核' })
+    }
     const visit = /^\/api\/songs\/([0-9a-f-]{36})\/visits$/i.exec(route)
     if (visit) {
       const user = await requireUser(req)
@@ -328,6 +352,22 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       const recorded = await store.recordVisit(visit[1], user.id)
       if (recorded === null) fail(404, '作品不存在、未审核或不可记录自己的作品')
       return reply(200, { recorded, notice: '仅记录平台登录账号的首次访问，不代表网易云有效播放或不同自然人' })
+    }
+    const moderateMatch = /^\/api\/admin\/songs\/([0-9a-f-]{36})\/(hide|restore)$/i.exec(route)
+    if (moderateMatch) {
+      authAdmin(req, adminToken)
+      await bodyJson(req)
+      const result = await store.moderateSong(moderateMatch[1], moderateMatch[2])
+      if (!result) fail(409, '作品不存在或当前状态不允许执行该操作')
+      return reply(200, { song: result })
+    }
+    const dismissMatch = /^\/api\/admin\/reports\/([0-9a-f-]{36})\/dismiss$/i.exec(route)
+    if (dismissMatch) {
+      authAdmin(req, adminToken)
+      await bodyJson(req)
+      const result = await store.dismissReport(dismissMatch[1])
+      if (!result) fail(404, '待处理举报不存在')
+      return reply(200, { report: result })
     }
     const approveProfile = /^\/api\/admin\/profiles\/([0-9a-f-]{36})\/approve$/i.exec(route)
     if (approveProfile) {
