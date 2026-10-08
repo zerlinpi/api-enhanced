@@ -42,7 +42,7 @@ if [[ "$(stat -c '%a' "$ENV_FILE")" != '600' ]]; then
   exit 1
 fi
 
-docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml config --quiet
+ENV_FILE="$ENV_FILE" bash deploy/compose.sh config --quiet
 docker info >/dev/null
 echo 'Preflight passed: Compose variables and Docker are ready.'
 echo 'Still confirm DNS, inbound ports 80/443, mail delivery and TLS issuance separately.'
