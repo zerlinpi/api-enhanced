@@ -59,19 +59,18 @@ CREATE TABLE IF NOT EXISTS community_audit_log (
 
 -- Reviewable content moderation: existing pending/approved rows are preserved.
 -- Community moderators can temporarily hide and reinstate previously approved works.
-DO $
-BEGIN
+DO 'BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_constraint c
     JOIN pg_class t ON t.oid=c.conrelid
-    WHERE t.relname='community_songs' AND c.conname='community_songs_status_check'
-      AND pg_get_constraintdef(c.oid) NOT LIKE '%hidden%'
+    WHERE t.relname=''community_songs'' AND c.conname=''community_songs_status_check''
+      AND pg_get_constraintdef(c.oid) NOT LIKE ''%hidden%''
   ) THEN
     ALTER TABLE community_songs DROP CONSTRAINT community_songs_status_check;
     ALTER TABLE community_songs ADD CONSTRAINT community_songs_status_check
-      CHECK (status IN ('pending', 'approved', 'hidden'));
+      CHECK (status IN (''pending'', ''approved'', ''hidden''));
   END IF;
-END $;
+END';
 
 CREATE TABLE IF NOT EXISTS community_song_reports (
   id uuid PRIMARY KEY,
