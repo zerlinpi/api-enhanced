@@ -36,7 +36,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks: [internal]
+    networks: [internal, public]
     read_only: true
     tmpfs: [/tmp]
     security_opt:
@@ -59,7 +59,7 @@ services:
       - caddy_config:/config
     depends_on:
       - app
-    networks: [internal, public]
+    networks: [public]
 
 networks:
   internal:
