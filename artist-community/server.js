@@ -124,6 +124,10 @@ function createServer({ store, adminToken = process.env.ARTIST_COMMUNITY_ADMIN_T
       const songs = await store.listSongs()
       return reply(200, { songs: songs.map(publicSong) })
     }
+    if (req.method === 'GET' && route === '/api/recommendations') {
+      const user = await requireUser(req)
+      return reply(200, { songs: (await store.recommendSongs(user.id)).map(publicSong) })
+    }
     if (req.method === 'GET' && route === '/api/profile') {
       const user = await requireUser(req)
       return reply(200, { profile: await store.getProfile(user.id) })
