@@ -30,6 +30,10 @@ esac
 id "$RUN_USER" >/dev/null
 test -f "$APP_DIR/.env.production" || { echo 'ERROR: Missing .env.production' >&2; exit 1; }
 test -f "$APP_DIR/backup.sh" || { echo 'ERROR: Missing backup.sh' >&2; exit 1; }
+if ! runuser -u "$RUN_USER" -- test -r "$APP_DIR/.env.production"; then
+  echo 'ERROR: RUN_USER cannot read .env.production; check directory and owner permissions' >&2
+  exit 1
+fi
 RETENTION="${BACKUP_RETENTION_DAYS:-14}"
 [[ "$RETENTION" =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: invalid retention days' >&2; exit 1; }
 RUN_GROUP="$(id -gn "$RUN_USER")"
