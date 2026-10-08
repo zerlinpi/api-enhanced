@@ -129,3 +129,33 @@ test('signup, login, approval, counted visits and logout', async t => {
   assert.equal((await post('/api/auth/logout', {}, ownerCookie)).status, 200)
   assert.equal((await fetch(base + '/api/profile', { headers: { Cookie: ownerCookie } })).status, 401)
 })
+
+
+test('trusted reverse proxy requests use independent client IP rate limits', async t => {
+  const server = createServer({ store: fakeStore(), trustProxy: true })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const url = 'http://127.0.0.1:' + server.address().port + '/api/auth/login'
+  const attempt = ip => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Community-Request': '1', 'X-Forwarded-For': ip },
+    body: JSON.stringify({ email: 'not-registered@example.com', password: 'long-test-password' }),
+  })
+  for (let i = 0; i < 10; i++) assert.equal((await attempt('198.51.100.11')).status, 401)
+  assert.equal((await attempt('198.51.100.11')).status, 429)
+  assert.equal((await attempt('198.51.100.12')).status, 401, 'one IP must not throttle other users')
+})
+
+test('untrusted X-Forwarded-For cannot evade limits when proxy mode is off', async t => {
+  const server = createServer({ store: fakeStore(), trustProxy: false })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const url = 'http://127.0.0.1:' + server.address().port + '/api/auth/login'
+  const attempt = ip => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Community-Request': '1', 'X-Forwarded-For': ip },
+    body: JSON.stringify({ email: 'unknown@example.com', password: 'long-test-password' }),
+  })
+  for (let i = 0; i < 10; i++) assert.equal((await attempt('203.0.113.' + (i + 1))).status, 401)
+  assert.equal((await attempt('203.0.113.99')).status, 429, 'spoofed headers cannot bypass direct mode')
+})
