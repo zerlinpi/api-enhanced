@@ -3,6 +3,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { isIP } = require('node:net')
 const { promisify } = require('node:util')
 const { createPgStore } = require('./db')
 const { createUnavailableMetricsProvider } = require('./official-metrics')
@@ -76,9 +77,21 @@ function guardMutation(req) {
     if (origin !== req.headers.host) fail(403, '禁止跨站请求')
   }
 }
-function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN } = {}) {
+function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN, trustProxy = process.env.ARTIST_COMMUNITY_TRUST_PROXY === 'true' } = {}) {
   if (!store) throw new Error('store is required')
   const attempts = new Map()
+  function clientIp(req) {
+    // Trust forwarded IPs only when the app is reachable exclusively via a
+    // proxy configured to OVERWRITE (not append untrusted) X-Forwarded-For.
+    if (trustProxy) {
+      const forwarded = req.headers['x-forwarded-for']
+      if (typeof forwarded === 'string') {
+        const candidate = forwarded.split(',').pop().trim()
+        if (isIP(candidate)) return candidate
+      }
+    }
+    return req.socket.remoteAddress || '-'
+  }
   async function sendAccountToken(user, purpose) {
     if (!mailer) fail(503, '邮件服务尚未配置')
     const token = crypto.randomBytes(32).toString('hex')
@@ -95,8 +108,8 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (typeof password !== 'string' || password.length < 12 || password.length > 128) fail(400, '密码必须为 12–128 个字符')
     return password
   }
-  function throttle(req, action, limit) {
-    const key = (req.socket.remoteAddress || '-') + ':' + action
+  function throttle(req, action, limit, accountId) {
+    const key = action + ':' + (accountId ? 'user:' + accountId : 'ip:' + clientIp(req))
     const now = Date.now()
     const entry = attempts.get(key)
     const fresh = !entry || entry.until < now
@@ -203,7 +216,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       return reply(200, { ok: true, message: '邮箱验证成功' })
     }
     if (route === '/api/auth/resend-verification') {
-      throttle(req, 'resend-verification', 3)
+      throttle(req, 'resend-verification', 3, user.id)
       const user = await requireUser(req)
       await bodyJson(req)
       if (!user.emailVerifiedAt) await sendAccountToken(user, 'email_verification')
@@ -252,7 +265,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (route === '/api/profile') {
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
-      throttle(req, 'profile', 5)
+      throttle(req, 'profile', 5, user.id)
       const input = await bodyJson(req)
       const name = typeof input.artistName === 'string' ? input.artistName.trim() : ''
       const match = ARTIST_RE.exec(typeof input.url === 'string' ? input.url.trim() : '')
@@ -264,7 +277,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (route === '/api/songs') {
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
-      throttle(req, 'songs', 20)
+      throttle(req, 'songs', 20, user.id)
       const profile = await store.getProfile(user.id)
       if (!profile) fail(403, '请先绑定音乐人主页')
       const input = await bodyJson(req)
@@ -281,7 +294,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     const visit = /^\/api\/songs\/([0-9a-f-]{36})\/visits$/i.exec(route)
     if (visit) {
       const user = await requireUser(req)
-      throttle(req, 'visits', 100)
+      throttle(req, 'visits', 100, user.id)
       await bodyJson(req)
       if (!ID_RE.test(visit[1])) fail(400, '作品 ID 无效')
       const recorded = await store.recordVisit(visit[1], user.id)
