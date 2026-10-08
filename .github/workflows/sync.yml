@@ -57,6 +57,9 @@ jobs:
         if: steps.prepare.outputs.needed == 'true'
         run: |
           set -euo pipefail
+          # Fetch the previous proposal ref so force-with-lease checks the
+          # exact remote state; a concurrent editor's work will not be clobbered.
+          git fetch origin '+refs/heads/sync/upstream-proposal:refs/remotes/origin/sync/upstream-proposal' || true
           git push --force-with-lease origin HEAD:refs/heads/sync/upstream-proposal
 
       - name: Open or update pull request for manual review
