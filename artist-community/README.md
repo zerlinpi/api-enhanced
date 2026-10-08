@@ -1,67 +1,98 @@
-# 云音发现｜音乐人作品发现社区（独立应用）
+# 云音发现｜独立音乐人作品发现 Web
 
-这是本仓库中的 **独立 Web 项目**，与原有网易云音乐 API 服务器解耦。只提供真实的作品发现、音乐人投稿和人工审核，不模拟网易云播放，不收集第三方登录凭据，也不将站内访问解释成官方有效播放。
+在 `artist-community/` 目录运行的独立 Web 服务，**不会更改主仓库的网易云 API 路由**。目标是用户主动发现歌曲，而非以自动播放操纵网易云数据。
 
-## 当前功能（阶段二）
+## 已实现（阶段三）
 
-- 本站邮箱/密码注册、登录、退出（scrypt 密码哈希，随机会话，数据库只保存会话 token 的 SHA-256）。
-- HttpOnly / SameSite=Lax 会话 Cookie；正式 HTTPS 环境启用 Secure。
-- 音乐人提交网易云公开主页 URL；服务生成证明码，待管理员核对简介后批准。**这里只是社区人工身份验证，不代表网易云官方认证。**
-- 已绑定音乐人可以投稿网易云歌曲；默认 `pending`，需管理员审核才能出现在大厅。
-- 已登录用户点击歌曲链接时记录**站内账号访问**，同一账号同一歌曲只记录一次；不能证明这些账号是不同自然人，更不能证明网易云有效播放。
-- 登录用户专属 `/api/recommendations` 推荐队列：过滤自己的作品和已经点开过的作品，并优先展示站内访问较少的作品；游客看到公开大厅。
-- PostgreSQL 数据存储、账号/作品唯一性、外键约束、记录去重和参数化查询。
-- 单独的 Node.js + PostgreSQL 集成测试和 GitHub Actions 工作流。
+- 本站邮箱账号注册/登录，`scrypt` 密码哈希、数据库中的会话哈希。
+- **邮件验证**：新账号收到 24 小时内有效的单次验证链接；未验证邮箱不能创建音乐人档案或投稿作品。
+- **密码找回**：30 分钟单次密码重置链接；重置后撤销该用户全部登录会话；对未知邮箱提供统一回复。
+- 网易云公开音乐人主页声明、临时证明码、管理员人工核实。
+- 歌曲投稿与审核、响应式用户端和 [可视化审核后台](/admin)（输入管理员密钥，不保存在 localStorage）。
+- PostgreSQL 存储、官方作品链接、站内账号访问去重、优先低曝光未访问作品的推荐。
+- `GET /api/official/metrics`：**官方授权数据源扩展点**，默认仅返回 `officialValidPlays: null` 和 `officialTaskStatus: "unavailable"`；未接入任何未经授权的数据接口。
+- 生产 Docker Compose（PostgreSQL + Node.js + Caddy 自动 HTTPS）、手动备份校验脚本、独立 CI 测试。
 
-## 环境要求
+**数据边界**：站内账号访问不代表真实播放、不等于不同自然人，也不等于网易云官方有效播放或会员领取任务达标。
 
-Node.js 20+、PostgreSQL 16+、npm。无需运行根目录的 `app.js`，不会改动主 API 接口。
+## 本地运行
 
-### 1. 启动 PostgreSQL
+需要 Node.js 20+、Docker 与 Compose、npm。使用当前目录相对于仓库根目录的命令：
 
 ```bash
-export POSTGRES_PASSWORD='replace-with-a-long-random-secret'
+export POSTGRES_PASSWORD='use-a-strong-db-password'
 docker compose -f artist-community/docker-compose.yml up -d
-```
-
-默认只向本机 `127.0.0.1:5432` 绑定端口。若已有 PostgreSQL，也可以自行创建数据库和用户。
-
-### 2. 安装依赖并启动社区应用
-
-```bash
 cd artist-community
 npm install
-export DATABASE_URL="postgres://community:replace-with-a-long-random-secret@127.0.0.1:5432/artist_community"
+export DATABASE_URL='postgres://community:use-a-strong-db-password@127.0.0.1:5432/artist_community'
 export ARTIST_COMMUNITY_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export PUBLIC_BASE_URL='http://127.0.0.1:3100'
+export MAIL_MODE=console
 npm start
 ```
 
-浏览器打开 http://localhost:3100 。配置项见 `.env.example`。**示例文件仅作参考：程序不会自动加载 `.env`，要通过 shell 或进程管理器设置环境变量。**
+访问 http://127.0.0.1:3100；审核界面为 http://127.0.0.1:3100/admin 。
 
-服务器首次启动时执行 `schema.sql` 创建表；要求连接账号拥有建表权限。后续请引入版本化迁移和权限收敛。
+`MAIL_MODE=console` 会在**本地终端**打印验证和重置链接，**仅可在受控开发环境使用，不能用于真实用户或生产**。正式 SMTP 环境请设置 `MAIL_HOST`、`MAIL_PORT`、`MAIL_SECURE`、`MAIL_USER`、`MAIL_PASSWORD`、`MAIL_FROM`（见 `.env.example`）。程序不会自动加载 `.env`。
 
-### 3. 人工审核流程
+首次连接 PostgreSQL 时执行 `schema.sql` 幂等建表/扩列。旧数据仍保留；新增列 `email_verified_at` 默认为空，旧账号需要补做邮箱确认。
 
-1. 音乐人注册本站账号、提交音乐人主页；本站显示 `DISCOVERY-...` 证明码。
-2. 音乐人将证明码**临时放进网易云公开主页简介**。
-3. 管理员自行打开该网易云主页，核对数字 ID、名称及简介中的证明码。
-4. 管理员在可信终端通过以下接口批准，之后音乐人提交的歌曲仍需单独审核。
+## 使用与人工审核流程
+
+1. 先注册平台邮箱账号，点邮件链接，点击页面确认验证，再登录。
+2. 提交网易云音乐人公开主页（例如 `https://music.163.com/artist?id=123`），复制 `DISCOVERY-...` 证明码至该主页简介。
+3. 管理员访问 `/admin`，粘贴服务端提供的 `ARTIST_COMMUNITY_ADMIN_TOKEN`，加载队列，打开公开主页核对证明码后批准。
+4. 音乐人提交歌曲后，管理员继续人工核对作品归属并批准；歌曲才对其他用户可见。
+5. 登录用户访问作品链接可以形成一次**站内账号访问记录**，推荐页将逐渐排除已看过的歌曲。
+
+管理员页面不属于网易云官方后台，认证仅表示本站的人工核查；不应仅根据一个容易被复制的名称批准。
+
+## 正式服务器部署模板（尚未实际上线）
+
+准备 Linux 主机、指向该主机公网 IP 的域名、已放行的 TCP 80/443（HTTP/HTTPS）和 UDP 443（HTTP/3），以及有效 SMTP 凭证：
 
 ```bash
-# 手动从页面记录音乐人 UUID 与歌曲 UUID。管理员令牌必须保密。
-curl -H "Authorization: Bearer $ARTIST_COMMUNITY_ADMIN_TOKEN" \
-  http://127.0.0.1:3100/api/admin/review
-
-curl -X POST -H "Authorization: Bearer $ARTIST_COMMUNITY_ADMIN_TOKEN" \
-  -H "X-Community-Request: 1" -H "Content-Type: application/json" \
-  -d '{}' http://127.0.0.1:3100/api/admin/profiles/ARTIST_UUID/approve
-
-curl -X POST -H "Authorization: Bearer $ARTIST_COMMUNITY_ADMIN_TOKEN" \
-  -H "X-Community-Request: 1" -H "Content-Type: application/json" \
-  -d '{}' http://127.0.0.1:3100/api/admin/songs/SONG_UUID/approve
+cd artist-community
+cp .env.production.example .env.production
+chmod 600 .env.production
+# 编辑 .env.production，填写随机数据库密码、管理员令牌、域名、SMTP 凭证
+# 注意：DATABASE_URL 中的密码需要进行 URL 百分号编码
+# 用 caddy hash-password 生成 ADMIN_BASIC_HASH；含 $ 的哈希建议使用单引号包住整值
+docker run --rm caddy:2-alpine caddy hash-password --plaintext 'choose-a-separate-admin-password'
+docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
 ```
 
-管理员访问应限制在内网、VPN 或经过额外身份验证的环境；不要将管理 token 嵌入网页或提交 Git。
+Caddy 自动申请、续期 TLS 证书，普通站点通过域名访问，`/admin` 和 `/api/admin/*` 另受 HTTP Basic Auth 保护。可视化管理后台还要求独立的 Bearer 管理密钥，不要共享或提交到 Git。生产模式会启用 Secure Cookie，并要求 `PUBLIC_BASE_URL` 是 HTTPS。
+
+**这里提供的是部署配置，没有实际连接你的服务器、DNS 或 SMTP 服务，也没有公网发布。**
+
+## PostgreSQL 备份与恢复
+
+生产脚本 `backup.sh` 使用 Compose 内 PostgreSQL 容器进行 `pg_dump -Fc`，再通过同一容器的 `pg_restore --list` 检查归档格式成功后才保留文件。选用 Docker 卷之外的**长期保存目录**：
+
+```bash
+cd artist-community
+BACKUP_DIR=/srv/backups/artist-community bash backup.sh
+# 可选：BACKUP_RETENTION_DAYS=14 启用目录内的到期备份清理
+```
+
+该脚本**不会自行定时执行**。可由你在服务器中设置 cron/systemd timer 每天运行，并将备份再加密复制到异地存储。保持目录仅管理员可读。
+
+恢复前务必先在测试环境完成恢复演练，停止应用写入并确认选中正确数据库。示例（`RESTORE_BACKUP` 指向已验证的备份）：
+
+```bash
+cd artist-community
+export RESTORE_BACKUP=/srv/backups/artist-community/artist-community-YYYYMMDDTHHMMSSZ.dump
+docker compose --env-file .env.production -f docker-compose.prod.yml stop app
+docker compose --env-file .env.production -f docker-compose.prod.yml exec -T db \
+  pg_restore -U community -d artist_community --clean --if-exists --no-owner --no-acl \
+  < "$RESTORE_BACKUP"
+docker compose --env-file .env.production -f docker-compose.prod.yml start app
+```
+
+`--clean` **会覆盖目标数据库对象**；不要直接在唯一的生产数据库中尝试恢复，应先验证备份、保留完整副本并安排维护窗口。备份验证归档格式不等于恢复演练。
 
 ## 检查
 
@@ -70,20 +101,16 @@ cd artist-community
 npm test
 ```
 
-本地未设置 `DATABASE_URL` 时，PostgreSQL 集成测试会自动跳过，其余 HTTP/密码测试不依赖数据库。仓库 CI 会启动专用 PostgreSQL 服务执行所有测试。
+离线 HTTP / 前端语法测试可以不需要数据库；设置 `DATABASE_URL` 时运行 PostgreSQL 集成测试。独立 CI 文件：`.github/workflows/artist-community-ci.yml`。
 
-## 从第一阶段 JSON 版迁移
+## 技术限制与上线前工作
 
-第一阶段创建的 `.artist-community-data.json` **不会被覆盖或自动导入**。第二阶段以 PostgreSQL 为唯一数据源，之前的匿名歌曲没有可验证的投稿者所有权，因此不自动赋予任何新账号。请保留原 JSON 作为备份，待作品所有权核验后由音乐人重新提交。不要直接将旧站内访客统计写入新表。
+- 邮件发出依赖有效 SMTP 服务和 SPF/DKIM/DMARC；不能保证所有邮件被投递。
+- 当前限制登录/重置频率的计数器为**单 Node 进程内存**，多副本生产部署前应升级 Redis 限流并增加验证码。
+- 需要增加账号注销与数据删除、举报/撤回、邮箱修改验证、审核撤销、审计员角色及操作证据、版本化迁移和备份恢复演练。
+- 当前身份验证只核对公开证明码，不是网易云授权登录。
+- 官方任务数据接入必须先获得合法授权，并独立取得音乐人的数据读取授权；不能假设第三方逆向接口就等同官方授权。
 
-## 生产上线前仍需要
+## 第一阶段 JSON 数据迁移
 
-- 邮箱所有权验证、找回密码、禁用/删除账号、隐私告知与数据导出。
-- 更强的多实例速率限制（如 Redis）、验证码、防机器人与封禁处理。
-- 审核员的单独权限系统、审核证据记录、审计日志和撤销审批。
-- 数据库自动备份、备份恢复演练、版本化 schema 迁移、指标监控。
-- HTTPS、反向代理和密钥管理；`NODE_ENV=production` 时启用 Secure Cookie，切勿通过纯 HTTP 公网运行。
-- 正式授权的数据接入；目前所有网易云官方播放指标一律为 `null/unavailable`。
-- 当前“站内账号访问”仅表示有人从本站点过网易云链接，不意味着在网易云已真实完成歌曲播放。
-
-**注意：** 网易云音乐人会员领取条件及官方有效播放判定必须以音乐人中心为准。本项目不提供自动互刷/批量假播放功能。
+旧 `.artist-community-data.json` 不会被覆盖，也不会自动导入 PostgreSQL。匿名作品无法确认归属，应在所有权验证后由账号持有人重新提交；旧匿名浏览量不可直接视为新登录用户访问量。
