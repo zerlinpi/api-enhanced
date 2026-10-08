@@ -13,7 +13,10 @@ permissions:
 
 jobs:
   bot:
+    # Upstream-only bot: do not load upstream-maintained secrets or execute AI on fork comments.
     if: |
+      github.repository == 'NeteaseCloudMusicApiEnhanced/api-enhanced' &&
+      github.event.repository.fork == false &&
       (contains(github.event.comment.body, ' /oc') ||
        startsWith(github.event.comment.body, '/oc') ||
        contains(github.event.comment.body, ' /opencode') ||
