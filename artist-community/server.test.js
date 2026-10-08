@@ -23,6 +23,28 @@ function fakeStore() {
     },
     async ready() { return true },
     async addAudit() {},
+    async exportAccount(id) {
+      const u = [...users.values()].find(user => user.id === id)
+      if (!u) return null
+      return {
+        version: 1, account: { id: u.id, email: u.email },
+        artistProfile: profiles.get(id) || null,
+        submittedSongs: [...songs.values()].filter(song => song.ownerId === id),
+        visitedSongs: [...visits].filter(entry => entry.endsWith(':' + id)).map(entry => ({ songId: entry.split(':')[0] })),
+      }
+    },
+    async revokeAllSessions(id) { for (const [hash, value] of sessions) if (value === id) sessions.delete(hash) },
+    async deleteAccount(id) {
+      const u = [...users.values()].find(user => user.id === id)
+      if (!u) return false
+      users.delete(u.email)
+      await this.revokeAllSessions(id)
+      profiles.delete(id)
+      for (const [songId, song] of songs) if (song.ownerId === id) songs.delete(songId)
+      for (const key of visits) if (key.endsWith(':' + id) || !songs.has(key.split(':')[0])) visits.delete(key)
+      for (const [hash, token] of tokens) if (token.id === id) tokens.delete(hash)
+      return true
+    },
     async createSession(token, id) { sessions.set(token, id) },
     async findSession(token) { return [...users.values()].find(u => u.id === sessions.get(token)) },
     async deleteSession(token) { sessions.delete(token) },
