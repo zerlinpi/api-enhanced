@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>云音发现 · 审核后台</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f4f6fa;color:#1b283d}*{box-sizing:border-box}
+body{margin:0}header{background:#152744;color:white;padding:28px max(20px,calc((100% - 1080px)/2))}
+header h1{font-size:1.55rem;margin:4px 0}main{max-width:1080px;margin:24px auto;padding:0 20px}
+section{background:white;border-radius:14px;border:1px solid #e4eaf2;padding:22px;margin:0 0 20px;box-shadow:0 6px 25px #1423420a}
+button,input{font:inherit;border-radius:8px;padding:11px}input{border:1px solid #cbd4e3;width:min(100%,530px)}
+button{color:white;background:#3459ac;border:0;cursor:pointer}button:disabled{opacity:.5}
+button.secondary{background:#edf1fa;color:#2b488c}button.success{background:#187954}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}a{color:#3556a5}
+.item{padding:16px 0;border-top:1px solid #edf0f5;display:grid;gap:8px}
+.item strong{display:block}.muted{font-size:.9rem;color:#67758b;line-height:1.5}
+code{background:#eff2f8;padding:6px;border-radius:6px;overflow-wrap:anywhere}
+#notice{min-height:20px;color:#2d548e} .counter{border-radius:30px;background:#edf1fa;padding:5px 12px;font-size:.9rem}
+</style></head>
+<body>
+<header><h1>音乐人社区审核中心</h1><p>仅授权管理人员使用 · 所有身份审核均需人工核对网易云公开主页</p></header>
+<main>
+<section><h2>管理员身份</h2><div class="row">
+<input id="adminToken" type="password" autocomplete="off" placeholder="输入服务端配置的管理员令牌">
+<button id="connect">加载待审核列表</button><button id="clear" class="secondary">清除令牌</button>
+</div><p class="muted">令牌只保存在本页面的运行内存，不写入浏览器存储。请通过 HTTPS、受信网络访问后台。</p>
+<p id="notice" role="status">管理员登录不会改变普通用户的会话。</p></section>
+<section><div class="row"><h2>音乐人认证审核</h2><span id="profileCount" class="counter">—</span></div>
+<p class="muted">核对主页数字 ID、名称及公开简介中的证明码，并确认账号归属后才能批准。</p>
+<div id="profiles">请先加载待审核列表。</div></section>
+<section><div class="row"><h2>歌曲审核</h2><span id="songCount" class="counter">—</span></div>
+<p class="muted">请确认歌曲确实属于已审核的音乐人。系统不自动播放，也不产生任何有效播放数据。</p>
+<div id="songs">请先加载待审核列表。</div></section>
+<p><a href="/">← 返回音乐发现大厅</a></p>
+</main>
+<script>
+const $=id=>document.getElementById(id)
+let adminToken=''
+function el(tag,value){const result=document.createElement(tag);result.textContent=value;return result}
+function notice(message){$('notice').textContent=message}
+async function api(path,method='GET'){
+ const response=await fetch(path,{method,cache:'no-store',headers:{
+  'Authorization':'Bearer '+adminToken,'Content-Type':'application/json','X-Community-Request':'1'
+ },...(method==='POST'?{body:'{}'}:{})})
+ const data=await response.json()
+ if(!response.ok)throw Error(data.error||'服务器请求失败')
+ return data
+}
+function entry(container,label,details,link,id,type,canApprove=true){
+ const article=el('article','');article.className='item'
+ article.append(el('strong',label),el('div',details))
+ if(link){const a=el('a','打开网易云公开页面 ↗');a.href=link;a.rel='noopener noreferrer';a.target='_blank';article.append(a)}
+ const button=el('button','审核通过');button.className='success';button.disabled=!canApprove
+ if(!canApprove)button.title='请先完成音乐人认证'
+ button.addEventListener('click',async()=>{
+  if(!confirm('请确认已经人工核验身份和所有权。确定批准此条记录吗？'))return
+  button.disabled=true
+  try{await api('/api/admin/'+type+'/'+id+'/approve','POST');notice('审核已记录');await load()}
+  catch(error){notice(error.message);button.disabled=false}
+ })
+ article.append(button);container.append(article)
+}
+async function load(){
+ if(!adminToken){notice('请先输入管理员令牌');return}
+ const result=await api('/api/admin/review')
+ const profiles=$('profiles'),songs=$('songs')
+ profiles.replaceChildren();songs.replaceChildren()
+ $('profileCount').textContent=result.profiles.length+' 待审核'
+ $('songCount').textContent=result.songs.length+' 待审核'
+ if(!result.profiles.length)profiles.append(el('p','暂无待审核音乐人'))
+ for(const p of result.profiles){
+  const link=/^\d+$/.test(p.artistId)?'https://music.163.com/artist?id='+p.artistId:null
+  entry(profiles,p.artistName,'音乐人ID：'+p.artistId+' | 公开证明码：'+p.proofCode+' | 用户ID：'+p.userId,link,p.userId,'profiles')
+ }
+ if(!result.songs.length)songs.append(el('p','暂无待审核歌曲'))
+ for(const s of result.songs){
+  const url=/^https:\/\/music\.163\.com\/song\?id=\d+$/.test(s.url)?s.url:null
+  entry(songs,s.title+' · '+s.artist,'用户ID：'+s.ownerId+' | 音乐人审核：'+(s.profileStatus||'未绑定'),url,s.id,'songs',s.profileStatus==='verified')
+ }
+ notice('审核队列更新成功')
+}
+$('connect').addEventListener('click',()=>{adminToken=$('adminToken').value.trim();$('adminToken').value='';load().catch(error=>notice(error.message))})
+$('clear').addEventListener('click',()=>{adminToken='';$('adminToken').value='';$('profiles').replaceChildren();$('songs').replaceChildren();notice('管理令牌已清除')})
+</script></body></html>
