@@ -30,6 +30,12 @@ code{background:#eff2f8;padding:6px;border-radius:6px;overflow-wrap:anywhere}
 <section><div class="row"><h2>歌曲审核</h2><span id="songCount" class="counter">—</span></div>
 <p class="muted">请确认歌曲确实属于已审核的音乐人。系统不自动播放，也不产生任何有效播放数据。</p>
 <div id="songs">请先加载待审核列表。</div></section>
+<section><div class="row"><h2>用户举报</h2><span id="reportCount" class="counter">—</span></div>
+<p class="muted">管理员需要自行核实举报证据。举报并不自动判定违规，也不自动下架歌曲。</p>
+<div id="reports">请先加载待审核列表。</div></section>
+<section><div class="row"><h2>已下架作品</h2><span id="hiddenCount" class="counter">—</span></div>
+<p class="muted">恢复前需重新确认歌曲归属和内容合规，下架期间不对外公开，也不计入推荐列表。</p>
+<div id="hiddenSongs">请先加载待审核列表。</div></section>
 <p><a href="/">← 返回音乐发现大厅</a></p>
 </main>
 <script>
@@ -61,7 +67,7 @@ function entry(container,label,details,link,id,type,canApprove=true){
 }
 async function load(){
  if(!adminToken){notice('请先输入管理员令牌');return}
- const result=await api('/api/admin/review')
+ const [result,mod]=await Promise.all([api('/api/admin/review'),api('/api/admin/reports')])
  const profiles=$('profiles'),songs=$('songs')
  profiles.replaceChildren();songs.replaceChildren()
  $('profileCount').textContent=result.profiles.length+' 待审核'
@@ -76,8 +82,49 @@ async function load(){
   const url=/^https:\/\/music\.163\.com\/song\?id=\d+$/.test(s.url)?s.url:null
   entry(songs,s.title+' · '+s.artist,'用户ID：'+s.ownerId+' | 音乐人审核：'+(s.profileStatus||'未绑定'),url,s.id,'songs',s.profileStatus==='verified')
  }
+ const reportList=$('reports'),hidden=$('hiddenSongs')
+ reportList.replaceChildren();hidden.replaceChildren()
+ $('reportCount').textContent=mod.reports.length+' 待处理'
+ $('hiddenCount').textContent=mod.hiddenSongs.length+' 已下架'
+ if(!mod.reports.length)reportList.append(el('p','暂无待处理举报'))
+ for(const report of mod.reports){
+  const article=el('article','');article.className='item'
+  article.append(el('strong',report.title+' · '+report.artist))
+  article.append(el('p','举报类别：'+report.reason+'｜补充说明：'+(report.details||'无')+'｜作品状态：'+report.songStatus))
+  const link=el('a','网易云官方歌曲页面 ↗');link.href=report.url;link.target='_blank';link.rel='noopener noreferrer';article.append(link)
+  const controls=el('div','');controls.className='row'
+  const hide=el('button','核实后下架');hide.disabled=report.songStatus!=='approved'
+  const dismiss=el('button','驳回举报');dismiss.className='secondary'
+  hide.addEventListener('click',async()=>{
+   if(!confirm('确认经过人工核实，需要下架这首歌曲？'))return
+   hide.disabled=true
+   try{await api('/api/admin/songs/'+report.songId+'/hide','POST');await load()}
+   catch(error){notice(error.message);hide.disabled=false}
+  })
+  dismiss.addEventListener('click',async()=>{
+   if(!confirm('确认举报不成立或无需处理？'))return
+   dismiss.disabled=true
+   try{await api('/api/admin/reports/'+report.id+'/dismiss','POST');await load()}
+   catch(error){notice(error.message);dismiss.disabled=false}
+  })
+  controls.append(hide,dismiss);article.append(controls);reportList.append(article)
+ }
+ if(!mod.hiddenSongs.length)hidden.append(el('p','暂无已下架作品'))
+ for(const song of mod.hiddenSongs){
+  const article=el('article','');article.className='item'
+  article.append(el('strong',song.title+' · '+song.artist))
+  const link=el('a','查看网易云作品 ↗');link.href=song.url;link.target='_blank';link.rel='noopener noreferrer';article.append(link)
+  const restore=el('button','审核后恢复公开');restore.className='secondary'
+  restore.addEventListener('click',async()=>{
+   if(!confirm('已重新核查身份与内容，确定恢复作品公开展示？'))return
+   restore.disabled=true
+   try{await api('/api/admin/songs/'+song.id+'/restore','POST');await load()}
+   catch(error){notice(error.message);restore.disabled=false}
+  })
+  article.append(restore);hidden.append(article)
+ }
  notice('审核队列更新成功')
 }
 $('connect').addEventListener('click',()=>{adminToken=$('adminToken').value.trim();$('adminToken').value='';load().catch(error=>notice(error.message))})
-$('clear').addEventListener('click',()=>{adminToken='';$('adminToken').value='';$('profiles').replaceChildren();$('songs').replaceChildren();notice('管理令牌已清除')})
+$('clear').addEventListener('click',()=>{adminToken='';$('adminToken').value='';for(const id of ['profiles','songs','reports','hiddenSongs'])$(id).replaceChildren();notice('管理令牌已清除')})
 </script></body></html>
