@@ -16,7 +16,7 @@ fi
 
 # Fail early if sample settings were left in place.
 for key in SITE_DOMAIN PUBLIC_BASE_URL DATABASE_URL POSTGRES_PASSWORD MAIL_HOST MAIL_USER MAIL_PASSWORD MAIL_FROM ARTIST_COMMUNITY_ADMIN_TOKEN ADMIN_BASIC_USER ADMIN_BASIC_HASH; do
-  if ! grep -Eq "^\${key}=[^[:space:]]+" "$ENV_FILE"; then
+  if ! grep -Eq "^${key}=[^[:space:]]+" "$ENV_FILE"; then
     echo "ERROR: missing production setting $key" >&2
     exit 1
   fi
