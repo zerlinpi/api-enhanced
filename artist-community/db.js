@@ -16,15 +16,15 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
   const q = (sql, values = []) => pool.query(sql, values)
   return {
     async createUser(user) {
-      const { rows } = await q('INSERT INTO community_users(id,email,password_hash) VALUES ($1,$2,$3) RETURNING id,email', [user.id, user.email, user.passwordHash])
+      const { rows } = await q('INSERT INTO community_users(id,email,password_hash) VALUES ($1,$2,$3) RETURNING id,email,email_verified_at AS "emailVerifiedAt"', [user.id, user.email, user.passwordHash])
       return rows[0]
     },
     async findUserByEmail(email) {
-      const { rows } = await q('SELECT id,email,password_hash AS "passwordHash" FROM community_users WHERE email=$1', [email])
+      const { rows } = await q('SELECT id,email,password_hash AS "passwordHash",email_verified_at AS "emailVerifiedAt" FROM community_users WHERE email=$1', [email])
       return rows[0] || null
     },
     async findSession(tokenHash) {
-      const { rows } = await q(`SELECT u.id,u.email FROM community_sessions s
+      const { rows } = await q(`SELECT u.id,u.email,u.email_verified_at AS "emailVerifiedAt" FROM community_sessions s
         JOIN community_users u ON u.id=s.user_id
         WHERE s.token_hash=$1 AND s.expires_at > now()`, [tokenHash])
       return rows[0] || null
@@ -109,6 +109,55 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         WHERE s.id=$1 AND s.owner_id=p.user_id AND p.status='verified' AND s.status='pending'
         RETURNING s.id,s.status`, [songId])
       return rows[0] || null
+    },
+    async saveAuthToken(userId, purpose, hash, expiresAt) {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        await client.query('DELETE FROM community_auth_tokens WHERE user_id=$1 AND purpose=$2', [userId, purpose])
+        await client.query('DELETE FROM community_auth_tokens WHERE expires_at < now()')
+        await client.query(
+          'INSERT INTO community_auth_tokens(token_hash,user_id,purpose,expires_at) VALUES ($1,$2,$3,$4)',
+          [hash, userId, purpose, expiresAt],
+        )
+        await client.query('COMMIT')
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
+    async consumeAuthToken(hash, purpose, newPasswordHash) {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const { rows } = await client.query(
+          'DELETE FROM community_auth_tokens WHERE token_hash=$1 AND purpose=$2 AND expires_at > now() RETURNING user_id',
+          [hash, purpose],
+        )
+        if (!rows.length) {
+          await client.query('ROLLBACK')
+          return false
+        }
+        const userId = rows[0].user_id
+        if (purpose === 'email_verification') {
+          await client.query('UPDATE community_users SET email_verified_at=COALESCE(email_verified_at,now()) WHERE id=$1', [userId])
+        } else if (purpose === 'password_reset') {
+          if (!newPasswordHash) throw new Error('Password hash is required')
+          await client.query('UPDATE community_users SET password_hash=$2 WHERE id=$1', [userId, newPasswordHash])
+          await client.query('DELETE FROM community_sessions WHERE user_id=$1', [userId])
+          await client.query('DELETE FROM community_auth_tokens WHERE user_id=$1', [userId])
+        } else {
+          throw new Error('Unsupported token purpose')
+        }
+        await client.query('COMMIT')
+        return true
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
+    async addAudit(action, targetId) {
+      await q('INSERT INTO community_audit_log(action,target_id) VALUES ($1,$2)', [action, targetId])
     },
     async close() { await pool.end() },
   }
