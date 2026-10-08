@@ -1,0 +1,106 @@
+name: Deploy Artist Community
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY to publish main to the configured production host"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artist-community-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only a reviewed main branch commit can be deployed, never a feature PR head.
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check required deployment secrets
+        env:
+          SSH_KEY: ${{ secrets.ARTIST_DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTIST_DEPLOY_KNOWN_HOSTS }}
+          SSH_USER: ${{ secrets.ARTIST_DEPLOY_USER }}
+          SSH_HOST: ${{ secrets.ARTIST_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          for value in "$SSH_KEY" "$SSH_KNOWN_HOSTS" "$SSH_USER" "$SSH_HOST"; do
+            test -n "$value" || { echo 'Missing required production SSH secret'; exit 1; }
+          done
+
+      - name: Prepare pinned SSH host identity
+        env:
+          SSH_KEY: ${{ secrets.ARTIST_DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTIST_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" >/dev/null
+
+      - name: Copy application (never overwrite production environment secrets)
+        env:
+          SSH_USER: ${{ secrets.ARTIST_DEPLOY_USER }}
+          SSH_HOST: ${{ secrets.ARTIST_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          remote="${SSH_USER}@${SSH_HOST}"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" 'mkdir -p "$HOME/apps/artist-platform/artist-community"'
+          rsync -az --exclude='.env.production' --exclude='.env.local' --exclude='node_modules/' \
+            --exclude='backups/' artist-community/ "$remote:apps/artist-platform/artist-community/"
+
+      - name: Validate production config, backup previous database, deploy
+        env:
+          SSH_USER: ${{ secrets.ARTIST_DEPLOY_USER }}
+          SSH_HOST: ${{ secrets.ARTIST_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          remote="${SSH_USER}@${SSH_HOST}"
+          ssh -o BatchMode=yes "$remote" 'bash -se' <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$HOME/apps/artist-platform/artist-community"
+          test -f .env.production || { echo 'Configure .env.production on the host first'; exit 1; }
+          chmod 600 .env.production
+          bash deploy/preflight.sh
+          if docker compose --env-file .env.production -f docker-compose.prod.yml ps -q db | grep -q .; then
+            BACKUP_DIR="$HOME/backups/artist-community" bash backup.sh
+          fi
+          docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+          docker compose --env-file .env.production -f docker-compose.prod.yml ps
+          REMOTE_SCRIPT
+
+      - name: Check app/database readiness behind proxy
+        env:
+          SSH_USER: ${{ secrets.ARTIST_DEPLOY_USER }}
+          SSH_HOST: ${{ secrets.ARTIST_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          remote="${SSH_USER}@${SSH_HOST}"
+          ssh -o BatchMode=yes "$remote" 'bash -se' <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$HOME/apps/artist-platform/artist-community"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if docker compose --env-file .env.production -f docker-compose.prod.yml exec -T app \
+              node -e "fetch('http://127.0.0.1:3100/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then
+              echo 'Readiness check passed'
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'Readiness check failed'
+          exit 1
+          REMOTE_SCRIPT
