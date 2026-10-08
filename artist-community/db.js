@@ -163,6 +163,69 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
       const { rows } = await q('SELECT 1 AS ok')
       return rows[0]?.ok === 1
     },
+    async exportAccount(userId) {
+      // Export only records belonging to the requesting account, using a
+      // consistent snapshot. Never include password hashes or session tokens.
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        const account = await client.query(
+          'SELECT id,email,created_at AS "createdAt",email_verified_at AS "emailVerifiedAt" FROM community_users WHERE id=$1',
+          [userId],
+        )
+        if (!account.rows.length) {
+          await client.query('ROLLBACK')
+          return null
+        }
+        const profile = await client.query(
+          'SELECT artist_id AS "artistId",artist_name AS "artistName",status,created_at AS "createdAt" FROM community_profiles WHERE user_id=$1',
+          [userId],
+        )
+        const songs = await client.query(
+          'SELECT id,netease_song_id AS "neteaseSongId",title,artist,url,status,created_at AS "createdAt" FROM community_songs WHERE owner_id=$1 ORDER BY created_at ASC',
+          [userId],
+        )
+        const visits = await client.query(
+          'SELECT song_id AS "songId",created_at AS "createdAt" FROM community_visits WHERE user_id=$1 ORDER BY created_at ASC',
+          [userId],
+        )
+        await client.query('COMMIT')
+        return {
+          version: 1,
+          generatedAt: new Date().toISOString(),
+          account: account.rows[0],
+          artistProfile: profile.rows[0] || null,
+          submittedSongs: songs.rows,
+          visitedSongs: visits.rows,
+        }
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
+    async revokeAllSessions(userId) {
+      await q('DELETE FROM community_sessions WHERE user_id=$1', [userId])
+    },
+    async deleteAccount(userId) {
+      // This transaction removes the user's profile, songs, visits,
+      // email tokens and sessions through ON DELETE CASCADE.
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        // Remove directly identifying audit targets before dropping the account.
+        await client.query(`DELETE FROM community_audit_log
+          WHERE target_id=$1 OR target_id IN
+            (SELECT id::text FROM community_songs WHERE owner_id=$2)`, [userId, userId])
+        const { rowCount } = await client.query(
+          'DELETE FROM community_users WHERE id=$1', [userId],
+        )
+        await client.query('COMMIT')
+        return rowCount > 0
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
+    },
     async close() { await pool.end() },
   }
 }

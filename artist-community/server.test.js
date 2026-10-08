@@ -23,6 +23,28 @@ function fakeStore() {
     },
     async ready() { return true },
     async addAudit() {},
+    async exportAccount(id) {
+      const u = [...users.values()].find(user => user.id === id)
+      if (!u) return null
+      return {
+        version: 1, account: { id: u.id, email: u.email },
+        artistProfile: profiles.get(id) || null,
+        submittedSongs: [...songs.values()].filter(song => song.ownerId === id),
+        visitedSongs: [...visits].filter(entry => entry.endsWith(':' + id)).map(entry => ({ songId: entry.split(':')[0] })),
+      }
+    },
+    async revokeAllSessions(id) { for (const [hash, value] of sessions) if (value === id) sessions.delete(hash) },
+    async deleteAccount(id) {
+      const u = [...users.values()].find(user => user.id === id)
+      if (!u) return false
+      users.delete(u.email)
+      await this.revokeAllSessions(id)
+      profiles.delete(id)
+      for (const [songId, song] of songs) if (song.ownerId === id) songs.delete(songId)
+      for (const key of visits) if (key.endsWith(':' + id) || !songs.has(key.split(':')[0])) visits.delete(key)
+      for (const [hash, token] of tokens) if (token.id === id) tokens.delete(hash)
+      return true
+    },
     async createSession(token, id) { sessions.set(token, id) },
     async findSession(token) { return [...users.values()].find(u => u.id === sessions.get(token)) },
     async deleteSession(token) { sessions.delete(token) },
@@ -158,4 +180,90 @@ test('untrusted X-Forwarded-For cannot evade limits when proxy mode is off', asy
   })
   for (let i = 0; i < 10; i++) assert.equal((await attempt('203.0.113.' + (i + 1))).status, 401)
   assert.equal((await attempt('203.0.113.99')).status, 429, 'spoofed headers cannot bypass direct mode')
+})
+
+
+test('account export, revoke all sessions and permanent deletion are private', async t => {
+  const sent = {}
+  const store = fakeStore()
+  const adminToken = 'unit-test-admin-secret-must-be-at-least-32-characters'
+  const server = createServer({ store, adminToken, mailer: {
+    async sendVerification(email, token) { sent[email] = token },
+    async sendPasswordReset() {},
+  } })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const base = 'http://127.0.0.1:' + server.address().port
+  const post = (route, body = {}, cookie = '', admin = false) => fetch(base + route, {
+    method: 'POST', headers: {
+      'Content-Type': 'application/json', 'X-Community-Request': '1',
+      Cookie: cookie, ...(admin ? { Authorization: 'Bearer ' + adminToken } : {}),
+    }, body: JSON.stringify(body),
+  })
+  const get = (route, cookie = '') => fetch(base + route, { headers: { Cookie: cookie } })
+  const password = 'a-secure-test-password-2026'
+  let response = await get('/api/account/export')
+  assert.equal(response.status, 401, 'anonymous export must be rejected')
+
+  response = await post('/api/auth/register', { email: 'artist@example.com', password })
+  assert.equal(response.status, 201)
+  response = await post('/api/auth/verify-email', { token: sent['artist@example.com'] })
+  assert.equal(response.status, 200)
+
+  async function login(email, credential = password) {
+    const r = await post('/api/auth/login', { email, password: credential })
+    assert.equal(r.status, 200)
+    return { cookie: r.headers.get('set-cookie').split(';')[0], user: (await r.json()).user }
+  }
+  const first = await login('artist@example.com')
+  const second = await login('artist@example.com')
+
+  response = await post('/api/profile', { artistName: 'Original Artist', url: 'https://music.163.com/artist?id=87262' }, first.cookie)
+  assert.equal(response.status, 201)
+  response = await post('/api/songs', { title: 'Original Song', url: 'https://music.163.com/song?id=76272' }, first.cookie)
+  assert.equal(response.status, 201)
+  const songId = (await response.json()).song.id
+  assert.equal((await post('/api/admin/profiles/' + first.user.id + '/approve', {}, '', true)).status, 200)
+  assert.equal((await post('/api/admin/songs/' + songId + '/approve', {}, '', true)).status, 200)
+
+  assert.equal((await post('/api/auth/register', { email: 'listener@example.com', password })).status, 201)
+  const listener = await login('listener@example.com')
+  assert.equal((await post('/api/songs/' + songId + '/visits', {}, listener.cookie)).status, 200)
+
+  response = await get('/api/account/export', first.cookie)
+  assert.equal(response.status, 200)
+  const exported = await response.json()
+  assert.equal(exported.account.email, 'artist@example.com')
+  assert.equal(exported.submittedSongs.length, 1)
+  assert.equal(exported.artistProfile.artistId, '87262')
+  assert.equal(exported.visitedSongs.length, 0)
+  assert.equal(JSON.stringify(exported).includes('passwordHash'), false)
+  assert.equal(JSON.stringify(exported).includes('ac_sid'), false)
+
+  response = await get('/api/account/export', listener.cookie)
+  const listenerExport = await response.json()
+  assert.equal(listenerExport.account.email, 'listener@example.com')
+  assert.equal(listenerExport.submittedSongs.length, 0)
+  assert.equal(listenerExport.visitedSongs.length, 1)
+
+  response = await post('/api/account/logout-all', { password: 'wrong-long-password' }, first.cookie)
+  assert.equal(response.status, 403)
+  response = await post('/api/account/logout-all', { password }, first.cookie)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('set-cookie'), /Max-Age=0/)
+  assert.equal((await (await get('/api/auth/me', first.cookie)).json()).user, null)
+  assert.equal((await (await get('/api/auth/me', second.cookie)).json()).user, null)
+  assert.equal((await (await get('/api/auth/me', listener.cookie)).json()).user.email, 'listener@example.com')
+
+  const third = await login('artist@example.com')
+  assert.equal((await post('/api/account/delete', { password, confirmation: 'delete' }, third.cookie)).status, 400)
+  assert.equal((await post('/api/account/delete', { password: 'invalid-password', confirmation: 'DELETE' }, third.cookie)).status, 403)
+  response = await post('/api/account/delete', { password, confirmation: 'DELETE' }, third.cookie)
+  assert.equal(response.status, 200)
+  assert.equal((await (await get('/api/auth/me', third.cookie)).json()).user, null)
+  assert.equal((await (await get('/api/songs')).json()).songs.length, 0)
+  response = await get('/api/account/export', listener.cookie)
+  assert.equal((await response.json()).visitedSongs.length, 0)
+  // A deleted user's unique email address is no longer reserved.
+  assert.equal((await post('/api/auth/register', { email: 'artist@example.com', password })).status, 201)
 })

@@ -30,6 +30,23 @@
 <hr style="width:100%;border:0;border-top:1px solid #e6ebf5">
 <form id="registerForm"><strong>创建新账户</strong><input name="email" type="email" autocomplete="email" placeholder="邮箱" required><input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="密码（至少12位）" required><button class="secondary">注册</button></form>
 </div>
+<div id="accountControls" class="stack hidden" style="margin-top:18px">
+  <strong>我的账户与隐私</strong>
+  <button id="downloadAccountData" type="button" class="secondary">导出我的账户数据（JSON）</button>
+  <form id="logoutAllForm">
+    <input name="password" type="password" autocomplete="current-password" placeholder="输入本站密码以退出所有设备" required>
+    <button type="submit" class="secondary">退出所有登录设备</button>
+  </form>
+  <details>
+    <summary style="cursor:pointer">永久注销我的账户</summary>
+    <p class="muted">这将删除本站账户、音乐人档案、上传作品和站内访问记录。网易云账户不受影响。数据库备份可能会在既定保留期内继续存在。</p>
+    <form id="deleteAccountForm">
+      <input name="password" type="password" autocomplete="current-password" placeholder="输入本站密码确认身份" required>
+      <input name="confirmation" type="text" autocomplete="off" placeholder="输入大写 DELETE 确认永久注销" required>
+      <button type="submit" style="background:#a82e39">永久注销账户</button>
+    </form>
+  </details>
+</div>
 <div class="stack" style="margin-top:18px">
 <form id="verifyForm" class="hidden"><strong>完成邮箱验证</strong><input name="token" id="verifyToken" autocomplete="off" placeholder="验证邮件中的一次性令牌" required><button>验证邮箱</button></form>
 <form id="forgotForm"><strong>忘记密码？</strong><input name="email" type="email" autocomplete="email" placeholder="注册时使用的邮箱" required><button class="secondary">发送重置邮件</button></form>
@@ -94,6 +111,7 @@ async function refreshAccount(){
  $('logout').classList.toggle('hidden',!currentUser)
  $('account').textContent=currentUser?'已登录：'+currentUser.email+(currentUser.emailVerified?' · 邮箱已验证':' · 邮箱未验证'):'尚未登录。注册并完成邮箱验证后可申请音乐人认证。'
  $('resend').classList.toggle('hidden',!currentUser||currentUser.emailVerified)
+ $('accountControls').classList.toggle('hidden',!currentUser)
  if(!currentUser){currentProfile=null;$('profileInfo').textContent='请先登录。';$('profileForm').classList.add('hidden');$('mySongs').replaceChildren();return}
  const [profile, mine]=await Promise.all([api('/api/profile'),api('/api/my/songs')])
  currentProfile=profile.profile
@@ -150,6 +168,41 @@ const linkParams=new URLSearchParams(location.hash.slice(1))
 if(linkParams.has('verify')){$('verifyToken').value=linkParams.get('verify');$('verifyForm').classList.remove('hidden')}
 if(linkParams.has('reset')){$('resetToken').value=linkParams.get('reset');$('resetForm').classList.remove('hidden')}
 if(linkParams.has('verify')||linkParams.has('reset'))history.replaceState(null,'',location.pathname+location.search)
+$('downloadAccountData').addEventListener('click',async()=>{
+ try{
+  const data=await api('/api/account/export')
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'})
+  const address=URL.createObjectURL(blob)
+  const link=document.createElement('a')
+  link.href=address;link.download='artist-community-account-export.json'
+  link.click()
+  setTimeout(()=>URL.revokeObjectURL(address),2000)
+  notice('数据文件已生成。请妥善保管，其中包含账户和作品信息。')
+ }catch(error){notice(error.message)}
+})
+$('logoutAllForm').addEventListener('submit',async event=>{
+ event.preventDefault()
+ const form=event.currentTarget
+ try{
+  await post('/api/account/logout-all',formData(form))
+  form.reset()
+  await refreshAccount();await refreshSongs();await refreshMetrics()
+  notice('已退出所有设备。')
+ }catch(error){notice(error.message)}
+})
+$('deleteAccountForm').addEventListener('submit',async event=>{
+ event.preventDefault()
+ const form=event.currentTarget
+ const data=formData(form)
+ if(data.confirmation!=='DELETE'){notice('请准确输入大写 DELETE');return}
+ if(!confirm('最后确认：永久删除本站账户及全部关联数据？此操作不能撤销。'))return
+ try{
+  await post('/api/account/delete',data)
+  form.reset()
+  await refreshAccount();await refreshSongs();await refreshMetrics()
+  notice('账号已注销。网易云音乐账号不受影响。')
+ }catch(error){notice(error.message)}
+})
 $('logout').addEventListener('click',async()=>{try{await post('/api/auth/logout');await refreshAccount();await refreshSongs();notice('已退出登录')}catch(error){notice(error.message)}})
 $('reload').addEventListener('click',()=>refreshSongs().catch(error=>notice(error.message)))
 async function refreshLoginProviders(){
