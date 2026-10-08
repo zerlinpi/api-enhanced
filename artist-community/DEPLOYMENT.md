@@ -75,6 +75,20 @@ bash deploy/compose.sh exec -T app node -e "fetch('http://127.0.0.1:3100/api/hea
 
 现有代理需要将站点转发至 `http://127.0.0.1:3100`，保留 `Host` 请求头和正确 HTTPS；`/admin` 与 `/api/admin/*` 应由代理再加一层管理访问认证/网络白名单。
 
+**多用户限流的重要设置：** 生产 Compose 会设 `ARTIST_COMMUNITY_TRUST_PROXY=true`，使 Node 根据代理转发的真实 IP 区分不同用户。可信反向代理**必须覆盖客户端提交的** `X-Forwarded-For`，否则恶意用户可以伪造来源 IP 绕过登录限流。内置 Caddy 已显式覆盖该请求头。
+
+若现有代理使用 Nginx，请在新站点的 `location /` 反向代理配置中至少包含：
+
+```nginx
+proxy_pass http://127.0.0.1:3100;
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+```
+
+这里使用 `$remote_addr` 而不是未经核验的客户端 `X-Forwarded-For` 链。如果还有 CDN 或多层代理，应先正确设置信任的上游地址与真实 IP 解析规则，再转发可信地址；**不要把 Node 3100 端口直接开放公网**。
+
+
 **如果现有代理自身也在容器中，容器内的 127.0.0.1 通常不是宿主机**。须通过宿主机网关或共享 Docker 网络连接，具体取决于原代理部署方式，不能直接假定互通。
 
 ## 4. GitHub Actions 手动部署（合并 main 后）
