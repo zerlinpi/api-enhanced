@@ -94,7 +94,7 @@ BACKUP_DIR=/srv/backups/artist-community bash backup.sh
 
 ```bash
 cd ~/apps/artist-platform/artist-community
-sudo APP_DIR="$PWD" RUN_USER="$(whoami)" BACKUP_DIR=/srv/backups/artist-community \\
+sudo APP_DIR="$PWD" RUN_USER="$(whoami)" BACKUP_DIR=/srv/backups/artist-community \
   bash deploy/install-backup-timer.sh
 sudo systemctl start artist-community-backup.service
 sudo systemctl status artist-community-backup.timer
