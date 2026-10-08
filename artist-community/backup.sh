@@ -12,7 +12,8 @@ temporary="$(mktemp "$BACKUP_DIR/.artist-backup.XXXXXXXX")"
 trap 'rm -f -- "$temporary"' EXIT
 docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml exec -T db \
   pg_dump -U community -d artist_community --format=custom --no-owner --no-acl > "$temporary"
-pg_restore --list "$temporary" > /dev/null
+docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml exec -T db \
+  pg_restore --list < "$temporary" > /dev/null
 test -s "$temporary"
 mv -n -- "$temporary" "$destination"
 trap - EXIT
