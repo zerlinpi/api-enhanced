@@ -13,3 +13,7 @@ IFLOW.md
 precompiled
 # Legacy artist-community MVP local data (do not commit user browsing records)
 .artist-community-data.json
+# Artist community production credentials and local exports
+artist-community/.env.production
+artist-community/.env.local
+artist-community/backups/
