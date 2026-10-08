@@ -328,6 +328,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     }
     const reportMatch = /^\/api\/songs\/([0-9a-f-]{36})\/reports$/i.exec(route)
     if (reportMatch) {
+      if (!ID_RE.test(reportMatch[1])) fail(400, '作品 ID 无效')
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
       throttle(req, 'song-report', 10, user.id)
@@ -355,6 +356,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     }
     const moderateMatch = /^\/api\/admin\/songs\/([0-9a-f-]{36})\/(hide|restore)$/i.exec(route)
     if (moderateMatch) {
+      if (!ID_RE.test(moderateMatch[1])) fail(400, '作品 ID 无效')
       authAdmin(req, adminToken)
       await bodyJson(req)
       const result = await store.moderateSong(moderateMatch[1], moderateMatch[2])
@@ -363,6 +365,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     }
     const dismissMatch = /^\/api\/admin\/reports\/([0-9a-f-]{36})\/dismiss$/i.exec(route)
     if (dismissMatch) {
+      if (!ID_RE.test(dismissMatch[1])) fail(400, '举报 ID 无效')
       authAdmin(req, adminToken)
       await bodyJson(req)
       const result = await store.dismissReport(dismissMatch[1])
