@@ -10,9 +10,15 @@
     basic_auth {
       {$ADMIN_BASIC_USER} {$ADMIN_BASIC_HASH}
     }
-    reverse_proxy app:3100
+    reverse_proxy app:3100 {
+      # Replace rather than append any client-supplied forwarding header.
+      header_up X-Forwarded-For {remote_host}
+    }
   }
   handle {
-    reverse_proxy app:3100
+    reverse_proxy app:3100 {
+      # Replace rather than append any client-supplied forwarding header.
+      header_up X-Forwarded-For {remote_host}
+    }
   }
 }
