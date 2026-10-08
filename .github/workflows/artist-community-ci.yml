@@ -42,5 +42,9 @@ jobs:
           node --check artist-community/db.js
           node --check artist-community/server.test.js
           node --check artist-community/db.test.js
+      - name: Validate production Compose and backup syntax
+        run: |
+          docker compose --env-file artist-community/.env.production.example -f artist-community/docker-compose.prod.yml config --quiet
+          bash -n artist-community/backup.sh
       - name: Offline + PostgreSQL tests
         run: npm test --prefix artist-community
