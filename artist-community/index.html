@@ -20,10 +20,16 @@
 <section class="panel">
 <div class="topline"><h2>我的账户</h2><button id="logout" class="secondary hidden" type="button">退出</button></div>
 <div id="account" class="muted">正在检查登录状态…</div>
+<button id="resend" class="secondary hidden" type="button">重新发送验证邮件</button>
 <div id="authForms" class="stack hidden">
 <form id="loginForm"><strong>登录</strong><input name="email" type="email" autocomplete="email" placeholder="邮箱" required><input name="password" type="password" autocomplete="current-password" placeholder="密码" required><button>登录</button></form>
 <hr style="width:100%;border:0;border-top:1px solid #e6ebf5">
 <form id="registerForm"><strong>创建新账户</strong><input name="email" type="email" autocomplete="email" placeholder="邮箱" required><input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="密码（至少12位）" required><button class="secondary">注册</button></form>
+</div>
+<div class="stack" style="margin-top:18px">
+<form id="verifyForm" class="hidden"><strong>完成邮箱验证</strong><input name="token" id="verifyToken" autocomplete="off" placeholder="验证邮件中的一次性令牌" required><button>验证邮箱</button></form>
+<form id="forgotForm"><strong>忘记密码？</strong><input name="email" type="email" autocomplete="email" placeholder="注册时使用的邮箱" required><button class="secondary">发送重置邮件</button></form>
+<form id="resetForm" class="hidden"><strong>设置新密码</strong><input name="token" id="resetToken" autocomplete="off" placeholder="邮件中的重置令牌" required><input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="新密码（至少12位）" required><button>确认重置密码</button></form>
 </div>
 </section>
 <section class="panel">
@@ -51,8 +57,8 @@
 <section class="panel">
 <h2>会员任务与统计</h2>
 <div class="stack">
-<div>网易云官方有效播放：<strong>未接入</strong></div>
-<div>会员任务完成状态：<strong>未验证</strong></div>
+<div>网易云官方有效播放：<strong id="officialPlays">未接入</strong></div>
+<div>会员任务完成状态：<strong id="officialTask">未验证</strong></div>
 <div>社区收录作品：<strong id="songCount">—</strong></div>
 </div>
 <p class="muted">当前仅统计平台注册用户的作品访问，不保证是网易云有效播放，也不能认定为600名独立自然人。</p>
@@ -82,11 +88,13 @@ async function refreshAccount(){
  const data=await api('/api/auth/me');currentUser=data.user
  $('authForms').classList.toggle('hidden',!!currentUser)
  $('logout').classList.toggle('hidden',!currentUser)
- $('account').textContent=currentUser?'已登录：'+currentUser.email:'尚未登录。注册后可申请认证并投稿作品。'
+ $('account').textContent=currentUser?'已登录：'+currentUser.email+(currentUser.emailVerified?' · 邮箱已验证':' · 邮箱未验证'):'尚未登录。注册并完成邮箱验证后可申请音乐人认证。'
+ $('resend').classList.toggle('hidden',!currentUser||currentUser.emailVerified)
  if(!currentUser){currentProfile=null;$('profileInfo').textContent='请先登录。';$('profileForm').classList.add('hidden');$('mySongs').replaceChildren();return}
  const [profile, mine]=await Promise.all([api('/api/profile'),api('/api/my/songs')])
  currentProfile=profile.profile
- $('profileForm').classList.toggle('hidden',!!currentProfile)
+ $('profileForm').classList.toggle('hidden',!!currentProfile||!currentUser.emailVerified)
+ if(!currentUser.emailVerified && !currentProfile){$('profileInfo').textContent='请先完成邮箱验证，才能提交音乐人主页。'}
  if(currentProfile){
   const info=$('profileInfo');info.replaceChildren()
   info.append(el('p','音乐人：'+currentProfile.artistName+' · '+(currentProfile.status==='verified'?'社区已验证':'待人工验证')))
@@ -119,12 +127,26 @@ function attachForm(id,route,after){
   catch(error){notice(error.message)}
  })
 }
-attachForm('registerForm','/api/auth/register',refreshAccount)
-attachForm('loginForm','/api/auth/login',async()=>{await refreshAccount();await refreshSongs()})
+attachForm('registerForm','/api/auth/register',async()=>{notice('注册成功。请查收验证邮件，登录后完成邮箱验证。');await refreshAccount()})
+attachForm('loginForm','/api/auth/login',async()=>{await refreshAccount();await refreshSongs();await refreshMetrics()})
 attachForm('profileForm','/api/profile',refreshAccount)
 attachForm('songForm','/api/songs',async()=>{await refreshAccount();await refreshSongs()})
+attachForm('verifyForm','/api/auth/verify-email',async()=>{ $('verifyForm').classList.add('hidden');await refreshAccount();notice('邮箱验证成功。') })
+attachForm('forgotForm','/api/auth/forgot-password',async()=>notice('如果邮箱已注册，重置链接会发送到对应邮箱。'))
+attachForm('resetForm','/api/auth/reset-password',async()=>{ $('resetForm').classList.add('hidden');await refreshAccount();notice('密码已重置。请重新登录。') })
+$('resend').addEventListener('click',async()=>{try{await post('/api/auth/resend-verification');notice('验证邮件已发送。')}catch(error){notice(error.message)}})
+async function refreshMetrics(){
+ if(!currentUser){$('officialPlays').textContent='未接入';$('officialTask').textContent='未验证';return}
+ const data=await api('/api/official/metrics')
+ $('officialPlays').textContent=data.officialValidPlays===null?'未接入':String(data.officialValidPlays)
+ $('officialTask').textContent=data.officialTaskStatus==='unavailable'?'未验证':data.officialTaskStatus
+}
+const linkParams=new URLSearchParams(location.hash.slice(1))
+if(linkParams.has('verify')){$('verifyToken').value=linkParams.get('verify');$('verifyForm').classList.remove('hidden')}
+if(linkParams.has('reset')){$('resetToken').value=linkParams.get('reset');$('resetForm').classList.remove('hidden')}
+if(linkParams.has('verify')||linkParams.has('reset'))history.replaceState(null,'',location.pathname+location.search)
 $('logout').addEventListener('click',async()=>{try{await post('/api/auth/logout');await refreshAccount();await refreshSongs();notice('已退出登录')}catch(error){notice(error.message)}})
 $('reload').addEventListener('click',()=>refreshSongs().catch(error=>notice(error.message)))
-refreshAccount().then(refreshSongs).catch(error=>notice(error.message))
+refreshAccount().then(()=>Promise.all([refreshSongs(),refreshMetrics()])).catch(error=>notice(error.message))
 </script>
 </body></html>
