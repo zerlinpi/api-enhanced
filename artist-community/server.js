@@ -138,6 +138,21 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       return
     }
     if (req.method === 'GET' && route === '/api/health') return reply(200, { ok: true })
+    if (req.method === 'GET' && route === '/api/health/ready') {
+      try {
+        const ready = await store.ready()
+        return reply(ready ? 200 : 503, { ready: Boolean(ready) })
+      } catch { return reply(503, { ready: false }) }
+    }
+    if (req.method === 'GET' && route === '/api/auth/providers') {
+      return reply(200, {
+        local: { available: true },
+        netease: {
+          available: false,
+          reason: '请先取得网易云官方第三方登录许可、应用凭证和正式接口文档',
+        },
+      })
+    }
     if (req.method === 'GET' && route === '/api/auth/me') {
       const user = await userFromRequest(req)
       return reply(200, { user: user ? safeUser(user) : null })
