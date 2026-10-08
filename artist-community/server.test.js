@@ -101,19 +101,19 @@ test('signup, login, approval, counted visits and logout', async t => {
   assert.ok(sent.reset)
   r = await post('/api/auth/reset-password', { token: sent.reset, password: 'replaced-long-password' })
   assert.equal(r.status, 200)
-  assert.equal((await fetch(base + '/api/auth/me', { headers: { Cookie: activeCookie } }).then(x => x.json())).user, null)
+  assert.equal((await fetch(base + '/api/auth/me', { headers: { Cookie: cookie } }).then(x => x.json())).user, null)
   r = await post('/api/auth/reset-password', { token: sent.reset, password: 'another-long-password' })
   assert.equal(r.status, 400, 'reset token must be single-use')
   r = await post('/api/auth/login', { email: 'listener@example.com', password: 'replaced-long-password' })
   assert.equal(r.status, 200)
   const activeCookie = r.headers.get('set-cookie').split(';')[0]
-  let feed = await fetch(base + '/api/recommendations', { headers: { Cookie: cookie } })
+  let feed = await fetch(base + '/api/recommendations', { headers: { Cookie: activeCookie } })
   assert.equal((await feed.json()).songs.length, 1)
   for (const expected of [true, false]) {
     const result = await post('/api/songs/' + song.id + '/visits', {}, activeCookie)
     assert.equal((await result.json()).recorded, expected)
   }
-  feed = await fetch(base + '/api/recommendations', { headers: { Cookie: cookie } })
+  feed = await fetch(base + '/api/recommendations', { headers: { Cookie: activeCookie } })
   assert.equal((await feed.json()).songs.length, 0, 'seen songs leave the personal feed')
   const listing = (await (await get('/api/songs')).json()).songs[0]
   assert.equal(listing.communityVisitors, 1)
