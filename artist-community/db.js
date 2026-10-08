@@ -1,0 +1,104 @@
+'use strict'
+const fs = require('node:fs')
+const path = require('node:path')
+
+/** PostgreSQL-backed store. All values are parameters; no user-provided SQL fragments. */
+async function createPgStore(connectionString = process.env.DATABASE_URL) {
+  if (!connectionString) throw new Error('DATABASE_URL is required for the community app')
+  const { Pool } = require('pg')
+  const pool = new Pool({ connectionString, max: 10 })
+  try {
+    await pool.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'))
+  } catch (error) {
+    await pool.end()
+    throw error
+  }
+  const q = (sql, values = []) => pool.query(sql, values)
+  return {
+    async createUser(user) {
+      const { rows } = await q('INSERT INTO community_users(id,email,password_hash) VALUES ($1,$2,$3) RETURNING id,email', [user.id, user.email, user.passwordHash])
+      return rows[0]
+    },
+    async findUserByEmail(email) {
+      const { rows } = await q('SELECT id,email,password_hash AS "passwordHash" FROM community_users WHERE email=$1', [email])
+      return rows[0] || null
+    },
+    async findSession(tokenHash) {
+      const { rows } = await q(`SELECT u.id,u.email FROM community_sessions s
+        JOIN community_users u ON u.id=s.user_id
+        WHERE s.token_hash=$1 AND s.expires_at > now()`, [tokenHash])
+      return rows[0] || null
+    },
+    async createSession(tokenHash, userId, expiresAt) {
+      await q('DELETE FROM community_sessions WHERE expires_at < now()')
+      await q('INSERT INTO community_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,$3)', [tokenHash, userId, expiresAt])
+    },
+    async deleteSession(tokenHash) {
+      await q('DELETE FROM community_sessions WHERE token_hash=$1', [tokenHash])
+    },
+    async createProfile(userId, profile) {
+      const { rows } = await q(`INSERT INTO community_profiles(user_id,artist_id,artist_name,proof_code)
+        VALUES ($1,$2,$3,$4) RETURNING user_id AS "userId",artist_id AS "artistId",
+        artist_name AS "artistName",proof_code AS "proofCode",status`,
+      [userId, profile.artistId, profile.artistName, profile.proofCode])
+      return rows[0]
+    },
+    async getProfile(userId) {
+      const { rows } = await q(`SELECT user_id AS "userId",artist_id AS "artistId",
+        artist_name AS "artistName",proof_code AS "proofCode",status FROM community_profiles WHERE user_id=$1`, [userId])
+      return rows[0] || null
+    },
+    async createSong(song) {
+      const { rows } = await q(`INSERT INTO community_songs(id,owner_id,netease_song_id,title,artist,url)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        RETURNING id, owner_id AS "ownerId",title,artist,url,status,created_at AS "createdAt"`,
+      [song.id, song.ownerId, song.neteaseSongId, song.title, song.artist, song.url])
+      return rows[0]
+    },
+    async listSongs() {
+      const { rows } = await q(`SELECT s.id,s.title,s.artist,s.url,s.created_at AS "createdAt",
+        count(v.user_id)::int AS "communityVisitors"
+        FROM community_songs s LEFT JOIN community_visits v ON v.song_id=s.id
+        WHERE s.status='approved'
+        GROUP BY s.id ORDER BY s.created_at DESC LIMIT 100`)
+      return rows
+    },
+    async listMySongs(userId) {
+      const { rows } = await q(`SELECT id,title,artist,url,status,created_at AS "createdAt"
+        FROM community_songs WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 100`, [userId])
+      return rows
+    },
+    async recordVisit(songId, userId) {
+      const { rows } = await q(`INSERT INTO community_visits(song_id,user_id)
+        SELECT id,$2 FROM community_songs
+        WHERE id=$1 AND status='approved' AND owner_id <> $2
+        ON CONFLICT DO NOTHING RETURNING song_id`, [songId, userId])
+      if (rows.length) return true
+      const { rows: songs } = await q('SELECT id,owner_id,status FROM community_songs WHERE id=$1', [songId])
+      return songs.length && songs[0].status === 'approved' && songs[0].owner_id !== userId ? false : null
+    },
+    async reviewQueue() {
+      const [profiles, songs] = await Promise.all([
+        q(`SELECT user_id AS "userId",artist_id AS "artistId",artist_name AS "artistName",
+          proof_code AS "proofCode",status FROM community_profiles WHERE status='pending' ORDER BY created_at ASC LIMIT 100`),
+        q(`SELECT s.id,s.title,s.artist,s.url,s.owner_id AS "ownerId",p.status AS "profileStatus"
+          FROM community_songs s LEFT JOIN community_profiles p ON p.user_id=s.owner_id
+          WHERE s.status='pending' ORDER BY s.created_at ASC LIMIT 100`),
+      ])
+      return { profiles: profiles.rows, songs: songs.rows }
+    },
+    async approveProfile(userId) {
+      const { rows } = await q(`UPDATE community_profiles SET status='verified' WHERE user_id=$1 AND status='pending'
+        RETURNING user_id AS "userId",status`, [userId])
+      return rows[0] || null
+    },
+    async approveSong(songId) {
+      const { rows } = await q(`UPDATE community_songs s SET status='approved' FROM community_profiles p
+        WHERE s.id=$1 AND s.owner_id=p.user_id AND p.status='verified' AND s.status='pending'
+        RETURNING s.id,s.status`, [songId])
+      return rows[0] || null
+    },
+    async close() { await pool.end() },
+  }
+}
+module.exports = { createPgStore }
