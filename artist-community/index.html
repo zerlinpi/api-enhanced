@@ -123,7 +123,8 @@ async function refreshSongs(){
 function attachForm(id,route,after){
  $(id).addEventListener('submit',async event=>{
   event.preventDefault()
-  try{await post(route,formData(event.currentTarget));event.currentTarget.reset();notice('操作成功');await after()}
+  const form=event.currentTarget
+  try{await post(route,formData(form));form.reset();notice('操作成功');await after()}
   catch(error){notice(error.message)}
  })
 }
