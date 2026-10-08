@@ -60,6 +60,7 @@
 </div>
 <section class="panel">
 <div class="topline"><h2>发现新作品</h2><button id="reload" class="secondary">刷新</button></div>
+<p class="muted">登录后优先推荐未访问过的其他音乐人作品，并照顾曝光较少的作品。此为内容发现推荐，不代表官方播放任务。</p>
 <div id="songs">正在加载作品…</div>
 </section>
 </main>
@@ -95,10 +96,11 @@ async function refreshAccount(){
  if(mine.songs.length){holder.append(el('h3','我的作品'));for(const song of mine.songs)holder.append(el('p',song.title+' · '+(song.status==='approved'?'已公开':'待审核')))}
 }
 async function refreshSongs(){
- const data=await api('/api/songs')
- $('songCount').textContent=String(data.songs.length)
+ const published=await api('/api/songs')
+ const data=currentUser?await api('/api/recommendations'):published
+ $('songCount').textContent=String(published.songs.length)
  const list=$('songs');list.replaceChildren()
- if(!data.songs.length){list.append(el('p','暂无通过审核的作品。'));return}
+ if(!data.songs.length){list.append(el('p',currentUser?'暂时没有未浏览过的其他音乐人作品。':'暂无通过审核的作品。'));return}
  for(const song of data.songs){
   const card=el('div','');card.className='song'
   const info=el('div','');info.append(el('strong',song.title),el('small',song.artist+' · 站内账号访问 '+song.communityVisitors))
@@ -118,11 +120,11 @@ function attachForm(id,route,after){
  })
 }
 attachForm('registerForm','/api/auth/register',refreshAccount)
-attachForm('loginForm','/api/auth/login',refreshAccount)
+attachForm('loginForm','/api/auth/login',async()=>{await refreshAccount();await refreshSongs()})
 attachForm('profileForm','/api/profile',refreshAccount)
 attachForm('songForm','/api/songs',async()=>{await refreshAccount();await refreshSongs()})
-$('logout').addEventListener('click',async()=>{try{await post('/api/auth/logout');await refreshAccount();notice('已退出登录')}catch(error){notice(error.message)}})
+$('logout').addEventListener('click',async()=>{try{await post('/api/auth/logout');await refreshAccount();await refreshSongs();notice('已退出登录')}catch(error){notice(error.message)}})
 $('reload').addEventListener('click',()=>refreshSongs().catch(error=>notice(error.message)))
-Promise.all([refreshAccount(),refreshSongs()]).catch(error=>notice(error.message))
+refreshAccount().then(refreshSongs).catch(error=>notice(error.message))
 </script>
 </body></html>
