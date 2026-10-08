@@ -76,11 +76,11 @@ jobs:
           test -f .env.production || { echo 'Configure .env.production on the host first'; exit 1; }
           chmod 600 .env.production
           bash deploy/preflight.sh
-          if docker compose --env-file .env.production -f docker-compose.prod.yml ps -q db | grep -q .; then
+          if bash deploy/compose.sh ps -q db | grep -q .; then
             BACKUP_DIR="$HOME/backups/artist-community" bash backup.sh
           fi
-          docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-          docker compose --env-file .env.production -f docker-compose.prod.yml ps
+          bash deploy/compose.sh up -d --build
+          bash deploy/compose.sh ps
           REMOTE_SCRIPT
 
       - name: Check app/database readiness behind proxy
@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           cd "$HOME/apps/artist-platform/artist-community"
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if docker compose --env-file .env.production -f docker-compose.prod.yml exec -T app \
+            if bash deploy/compose.sh exec -T app \
               node -e "fetch('http://127.0.0.1:3100/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then
               echo 'Readiness check passed'
               exit 0
