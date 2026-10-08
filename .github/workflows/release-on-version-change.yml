@@ -16,6 +16,9 @@ concurrency:
 jobs:
   detect:
     name: Detect Version Change
+    # This upstream publishing workflow must never run on a public fork.
+    # Its npm package and Docker image targets belong to upstream maintainers.
+    if: github.repository == 'NeteaseCloudMusicApiEnhanced/api-enhanced' && github.event.repository.fork == false
     runs-on: ubuntu-latest
 
     outputs:

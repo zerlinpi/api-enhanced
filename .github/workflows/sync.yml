@@ -1,36 +1,84 @@
-name: Upstream Sync
-
-permissions:
-  contents: write
+name: Review Upstream Updates (Fork)
 
 on:
   schedule:
-    - cron: "0 4 * * *" # At 12PM UTC+8
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
+# Never merge upstream directly into fork main.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+
 jobs:
-  sync_latest_from_upstream:
-    name: Sync latest commits from upstream repo
+  propose:
+    if: github.repository == 'zerlinpi/api-enhanced' && github.event.repository.fork
     runs-on: ubuntu-latest
-    if: ${{ github.event.repository.fork }}
-
+    timeout-minutes: 20
     steps:
-      # Step 1: run a standard checkout action
-      - name: Checkout target repo
+      - name: Checkout our main branch
         uses: actions/checkout@v6
-
-      # Step 2: run the sync action
-      - name: Sync upstream changes
-        id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
         with:
-          upstream_sync_repo: NeteaseCloudMusicApiEnhanced/api-enhanced
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+          fetch-depth: 0
 
-      - name: Sync check
-        if: failure()
+      - name: Fetch official upstream
         run: |
-          echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork."
-          exit 1
+          set -euo pipefail
+          git remote add upstream https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced.git
+          git fetch upstream main
+          git fetch origin main
+
+      - name: Merge upstream into a proposal branch only
+        id: prepare
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+            echo 'Fork main already includes the current upstream main.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch --create upstream-proposal --track origin/main
+          if ! git merge --no-ff --no-edit upstream/main; then
+            git merge --abort || true
+            echo 'Upstream has merge conflicts with customized fork code.' >&2
+            echo 'Resolve conflicts manually in a separate branch; fork main has NOT been modified.' >&2
+            exit 1
+          fi
+          echo 'needed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Publish the proposal branch, not main
+        if: steps.prepare.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+          # Fetch the previous proposal ref so force-with-lease checks the
+          # exact remote state; a concurrent editor's work will not be clobbered.
+          git fetch origin '+refs/heads/sync/upstream-proposal:refs/remotes/origin/sync/upstream-proposal' || true
+          git push --force-with-lease origin HEAD:refs/heads/sync/upstream-proposal
+
+      - name: Open or update pull request for manual review
+        if: steps.prepare.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --head sync/upstream-proposal --base main --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Updated existing upstream review PR #$existing"
+          else
+            gh pr create --base main --head sync/upstream-proposal \
+              --title 'chore: review changes from upstream API' \
+              --body 'This PR proposes merging upstream API changes into the custom fork. Review conflicts, dependencies, security-sensitive workflows, release targets, and changes to artist-community before merging. **No direct automatic sync to main is performed.**'
+          fi
+
+      - name: Review reminder
+        if: steps.prepare.outputs.needed == 'true'
+        run: |
+          echo 'Review proposed changes and run normal checks before a manual merge.'
+          echo 'If GITHUB_TOKEN cannot create pull requests, enable the repository Actions PR setting or open a PR manually from sync/upstream-proposal.'
