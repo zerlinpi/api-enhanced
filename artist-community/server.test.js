@@ -21,6 +21,7 @@ function fakeStore() {
       }
       return true
     },
+    async ready() { return true },
     async addAudit() {},
     async createSession(token, id) { sessions.set(token, id) },
     async findSession(token) { return [...users.values()].find(u => u.id === sessions.get(token)) },
@@ -80,6 +81,11 @@ test('signup, login, approval, counted visits and logout', async t => {
   const metrics = await fetch(base + '/api/official/metrics', { headers: { Cookie: ownerCookie } })
   assert.equal((await metrics.json()).officialTaskStatus, 'unavailable')
   assert.equal((await get('/admin')).status, 200)
+  const health = await (await get('/api/health/ready')).json()
+  assert.equal(health.ready, true)
+  const providers = await (await get('/api/auth/providers')).json()
+  assert.equal(providers.local.available, true)
+  assert.equal(providers.netease.available, false, 'not yet authorized for external sign-in')
   r = await post('/api/profile', { artistName: 'Music', url: 'https://music.163.com/artist?id=123' }, ownerCookie)
   assert.ok((await r.json()).profile.proofCode.startsWith('DISCOVERY-'))
   r = await post('/api/songs', { title: 'Song', url: 'https://music.163.com/song?id=12345' }, ownerCookie)
