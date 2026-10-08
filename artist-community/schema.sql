@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS community_songs (
   title text NOT NULL,
   artist text NOT NULL,
   url text NOT NULL,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'hidden')),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS community_songs_owner_idx ON community_songs(owner_id);
@@ -56,3 +56,32 @@ CREATE TABLE IF NOT EXISTS community_audit_log (
   target_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Reviewable content moderation: existing pending/approved rows are preserved.
+-- Community moderators can temporarily hide and reinstate previously approved works.
+DO 'BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint c
+    JOIN pg_class t ON t.oid=c.conrelid
+    WHERE t.relname=''community_songs'' AND c.conname=''community_songs_status_check''
+      AND pg_get_constraintdef(c.oid) NOT LIKE ''%hidden%''
+  ) THEN
+    ALTER TABLE community_songs DROP CONSTRAINT community_songs_status_check;
+    ALTER TABLE community_songs ADD CONSTRAINT community_songs_status_check
+      CHECK (status IN (''pending'', ''approved'', ''hidden''));
+  END IF;
+END';
+
+CREATE TABLE IF NOT EXISTS community_song_reports (
+  id uuid PRIMARY KEY,
+  song_id uuid NOT NULL REFERENCES community_songs(id) ON DELETE CASCADE,
+  reporter_id uuid NOT NULL REFERENCES community_users(id) ON DELETE CASCADE,
+  reason text NOT NULL CHECK (reason IN ('copyright','impersonation','spam','other')),
+  details text NOT NULL DEFAULT '' CHECK (char_length(details) <= 500),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved','dismissed')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  reviewed_at timestamptz,
+  UNIQUE (song_id, reporter_id)
+);
+CREATE INDEX IF NOT EXISTS community_song_reports_status_idx
+  ON community_song_reports(status, created_at);

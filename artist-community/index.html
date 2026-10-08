@@ -5,7 +5,7 @@
 <meta name="description" content="独立音乐人作品发现社区">
 <title>云音发现 | 独立音乐人社区</title>
 <style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#18243b;background:#f4f6fb}*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer}header{background:linear-gradient(110deg,#111f42,#4055a2 65%,#685aa6);color:white;padding:44px max(22px,calc((100% - 1080px)/2)) 56px}header h1{font-size:clamp(2rem,5vw,3.2rem);margin:0 0 14px}header p{color:#e4e9ff;max-width:600px}main{max-width:1080px;padding:0 20px;margin:-24px auto 64px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.panel{background:white;border-radius:16px;box-shadow:0 12px 32px #192b480d;border:1px solid #e4e9f2;padding:24px;margin-bottom:20px}.panel h2{margin:0 0 15px;font-size:1.2rem}.stack{display:grid;gap:11px}input{width:100%;border:1px solid #cbd4e5;padding:12px;border-radius:9px}button{border:0;border-radius:9px;background:#354eaa;color:white;padding:12px 16px;font-weight:600}button.secondary{background:#edf1fb;color:#304b91}button:disabled{opacity:.5;cursor:not-allowed}small,.muted{color:#67748d;line-height:1.55}a{color:#304ba2}.topline{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.topline h2{margin:0}.song{border:1px solid #e5e9f2;border-radius:11px;padding:15px;display:flex;justify-content:space-between;align-items:center;gap:15px;margin:10px 0}.song strong{display:block}.song small{display:block;margin-top:3px}.song a{white-space:nowrap;text-decoration:none;font-weight:600}.pill{font-size:12px;border-radius:20px;background:#eef2fa;color:#3b5598;padding:5px 9px}.hidden{display:none!important}#notice{position:sticky;top:0;z-index:2;background:#162f59;color:white;padding:10px 20px;text-align:center;min-height:38px}form{display:grid;gap:10px}form button{width:100%}.account{display:flex;gap:10px;align-items:center;flex-wrap:wrap}code{overflow-wrap:anywhere;background:#f2f4fa;padding:5px;border-radius:4px}footer{text-align:center;padding:0 20px 35px;color:#69768c}@media(max-width:700px){.grid{grid-template-columns:1fr}.song{align-items:start;flex-direction:column}header{padding-bottom:56px}.panel{padding:19px}} 
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#18243b;background:#f4f6fb}*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button{cursor:pointer}header{background:linear-gradient(110deg,#111f42,#4055a2 65%,#685aa6);color:white;padding:44px max(22px,calc((100% - 1080px)/2)) 56px}header h1{font-size:clamp(2rem,5vw,3.2rem);margin:0 0 14px}header p{color:#e4e9ff;max-width:600px}main{max-width:1080px;padding:0 20px;margin:-24px auto 64px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.panel{background:white;border-radius:16px;box-shadow:0 12px 32px #192b480d;border:1px solid #e4e9f2;padding:24px;margin-bottom:20px}.panel h2{margin:0 0 15px;font-size:1.2rem}.stack{display:grid;gap:11px}input,select,textarea{width:100%;border:1px solid #cbd4e5;padding:12px;border-radius:9px}button{border:0;border-radius:9px;background:#354eaa;color:white;padding:12px 16px;font-weight:600}button.secondary{background:#edf1fb;color:#304b91}button:disabled{opacity:.5;cursor:not-allowed}small,.muted{color:#67748d;line-height:1.55}a{color:#304ba2}.topline{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.topline h2{margin:0}.song{border:1px solid #e5e9f2;border-radius:11px;padding:15px;display:flex;justify-content:space-between;align-items:center;gap:15px;margin:10px 0}.song strong{display:block}.song small{display:block;margin-top:3px}.song a{white-space:nowrap;text-decoration:none;font-weight:600}.pill{font-size:12px;border-radius:20px;background:#eef2fa;color:#3b5598;padding:5px 9px}.hidden{display:none!important}#notice{position:sticky;top:0;z-index:2;background:#162f59;color:white;padding:10px 20px;text-align:center;min-height:38px}form{display:grid;gap:10px}form button{width:100%}.account{display:flex;gap:10px;align-items:center;flex-wrap:wrap}code{overflow-wrap:anywhere;background:#f2f4fa;padding:5px;border-radius:4px}footer{text-align:center;padding:0 20px 35px;color:#69768c}@media(max-width:700px){.grid{grid-template-columns:1fr}.song{align-items:start;flex-direction:column}header{padding-bottom:56px}.panel{padding:19px}} 
 </style>
 </head>
 <body>
@@ -139,7 +139,35 @@ async function refreshSongs(){
    if(currentUser)post('/api/songs/'+song.id+'/visits').then(refreshSongs).catch(error=>notice(error.message))
    else notice('可以直接前往网易云收听；登录后才能记录站内首次访问')
   })
-  card.append(info,a);list.append(card)
+  card.append(info,a)
+  if(currentUser){
+   const reportBox=document.createElement('details')
+   const summary=el('summary','举报此作品（人工审核）')
+   summary.style.cursor='pointer'
+   const form=document.createElement('form')
+   const reason=document.createElement('select')
+   reason.name='reason'
+   for(const [code,label] of [['copyright','版权或侵权'],['impersonation','冒用音乐人身份'],['spam','垃圾或恶意内容'],['other','其他问题']]){
+    const option=document.createElement('option')
+    option.value=code;option.textContent=label;reason.append(option)
+   }
+   const details=document.createElement('textarea')
+   details.name='details';details.maxLength=500;details.rows=2
+   details.placeholder='可补充说明（最多500字）'
+   const button=el('button','提交举报');button.type='submit';button.className='secondary'
+   form.append(reason,details,button)
+   form.addEventListener('submit',async event=>{
+    event.preventDefault()
+    button.disabled=true
+    try{
+     await post('/api/songs/'+song.id+'/reports',{reason:reason.value,details:details.value})
+     notice('举报已提交，管理员会人工审核。')
+     reportBox.remove()
+    }catch(error){notice(error.message);button.disabled=false}
+   })
+   reportBox.append(summary,form);card.append(reportBox)
+  }
+  list.append(card)
  }
 }
 function attachForm(id,route,after){

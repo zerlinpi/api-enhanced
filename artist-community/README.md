@@ -10,6 +10,7 @@
 - **账号隐私控制**：已登录用户可导出自己的账户、音乐人档案、作品和站内访问记录（JSON，不包含密码哈希或会话令牌）；使用本站密码确认后可退出所有设备或永久删除本站账户。
 - **注销行为**：删除在线 PostgreSQL 中的账户、其上传作品、个人主页、访问记录、会话与一次性邮件令牌；对应作品的其他用户访问记录会因外键级联删除。网易云账号不会被删除或退出。旧的数据库备份和已导出的数据文件不在即时删除范围内。
 
+- **运营审核**：登录且验证邮箱的用户可举报涉嫌侵权、冒用身份、垃圾内容等作品；后台人工判断是否下架、驳回举报或恢复作品。下架作品不会出现在公开大厅和推荐中。每名用户每首作品只能提交一次举报，所有管理动作写入审计日志。
 - 网易云公开音乐人主页声明、临时证明码、管理员人工核实。
 - 歌曲投稿与审核、响应式用户端和 [可视化审核后台](/admin)（输入管理员密钥，不保存在 localStorage）。
 - PostgreSQL 存储、官方作品链接、站内账号访问去重、优先低曝光未访问作品的推荐。
@@ -89,7 +90,18 @@ BACKUP_DIR=/srv/backups/artist-community bash backup.sh
 # 可选：BACKUP_RETENTION_DAYS=14 启用目录内的到期备份清理
 ```
 
-该脚本**不会自行定时执行**。可由你在服务器中设置 cron/systemd timer 每天运行，并将备份再加密复制到异地存储。保持目录仅管理员可读。
+该脚本不会自行定时执行。现在新增了 **systemd Timer 安装脚本** `deploy/install-backup-timer.sh`；在生产服务器上经管理员确认后可执行每天一次的自动备份，默认保留约 14 天。需先创建服务器配置并保证服务用户能使用 Docker：
+
+```bash
+cd ~/apps/artist-platform/artist-community
+sudo APP_DIR="$PWD" RUN_USER="$(whoami)" BACKUP_DIR=/srv/backups/artist-community \
+  bash deploy/install-backup-timer.sh
+sudo systemctl start artist-community-backup.service
+sudo systemctl status artist-community-backup.timer
+sudo journalctl -u artist-community-backup.service -n 50
+```
+
+该安装脚本**只提交到 GitHub，不会直接改动你的服务器**。正式使用应将备份再加密复制到异地存储，限制访问权限，并在隔离数据库进行恢复演练。自动清理只清理匹配备份命名格式的旧文件；注销用户数据不会自动清除已经生成的历史备份。
 
 恢复前务必先在测试环境完成恢复演练，停止应用写入并确认选中正确数据库。示例（`RESTORE_BACKUP` 指向已验证的备份）：
 
