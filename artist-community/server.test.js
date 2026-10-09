@@ -373,3 +373,54 @@ test('verified listeners can report works; admins can dismiss, hide and restore'
   assert.equal((await post('/api/admin/reports/' + reportId + '/dismiss', {}, '', true)).status, 404)
   assert.equal((await (await get('/api/admin/reports', '', true)).json()).reports.length, 0)
 })
+
+
+test('verification email can be resent after login without a user reference error', async t => {
+  const store = fakeStore()
+  const emails = []
+  const server = createServer({ store, mailer: {
+    async sendVerification(email, token) { emails.push({ email, token }) },
+    async sendPasswordReset() {},
+  } })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const url = 'http://127.0.0.1:' + server.address().port
+  const post = (route, body = {}, cookie = '') => fetch(url + route, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Community-Request': '1', Cookie: cookie },
+    body: JSON.stringify(body),
+  })
+  assert.equal((await post('/api/auth/register', {
+    email: 'resend@example.com', password: 'a-long-test-password',
+  })).status, 201)
+  assert.equal(emails.length, 1)
+  const login = await post('/api/auth/login', {
+    email: 'resend@example.com', password: 'a-long-test-password',
+  })
+  const cookie = login.headers.get('set-cookie').split(';')[0]
+  assert.equal((await post('/api/auth/resend-verification', {}, cookie)).status, 200)
+  assert.equal(emails.length, 2)
+  assert.notEqual(emails[0].token, emails[1].token)
+  assert.equal((await post('/api/auth/verify-email', { token: emails[0].token })).status, 400)
+  assert.equal((await post('/api/auth/verify-email', { token: emails[1].token })).status, 200)
+})
+
+test('a failed Redis limiter fails closed and makes readiness unhealthy', async t => {
+  const server = createServer({ store: fakeStore(), rateLimiter: {
+    async check() { throw new Error('secret backend connection string') },
+    async ready() { return false },
+  } })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => server.close())
+  const base = 'http://127.0.0.1:' + server.address().port
+  const readiness = await fetch(base + '/api/health/ready')
+  assert.equal(readiness.status, 503)
+  assert.deepEqual(await readiness.json(), { ready: false })
+  const login = await fetch(base + '/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Community-Request': '1' },
+    body: JSON.stringify({ email: 'guest@example.com', password: 'not-a-valid-password' }),
+  })
+  assert.equal(login.status, 503)
+  const body = await login.json()
+  assert.equal(body.error, '请求限制服务暂不可用')
+  assert.doesNotMatch(JSON.stringify(body), /secret backend/)
+})
