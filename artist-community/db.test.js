@@ -158,3 +158,37 @@ test('PostgreSQL moderation reports persist and hidden songs are excluded', { sk
   assert.equal((await db.listHiddenSongs()).some(s => s.id === workId), false)
   assert.equal((await db.listPendingReports()).some(r => r.songId === workId), false)
 })
+
+
+test('PostgreSQL admin roles leave attributable audit records and overview counters', { skip: !process.env.DATABASE_URL }, async t => {
+  const db=await createPgStore()
+  t.after(()=>db.close())
+  const actor='reviewer'
+  const owner=crypto.randomUUID()
+  const mail=owner+'@example.invalid'
+  await db.createUser({id:owner,email:mail,passwordHash:'not-a-real-hash'})
+  const artistId=String(Date.now())+crypto.randomInt(100000,999999)
+  await db.createProfile(owner,{artistId,artistName:'Audit Test',proofCode:'AUDIT-CODE'})
+  const song=crypto.randomUUID()
+  await db.createSong({id:song,ownerId:owner,neteaseSongId:artistId+'1',
+    title:'Audited Song',artist:'Audit Test',url:'https://music.163.com/song?id='+artistId+'1'})
+  assert.equal((await db.approveProfile(owner,actor)).status,'verified')
+  assert.equal((await db.approveSong(song,actor)).status,'approved')
+  assert.equal((await db.moderateSong(song,'hide',actor)).status,'hidden')
+  assert.equal((await db.moderateSong(song,'restore','owner')).status,'approved')
+  const entries=await db.listAudit(50)
+  for(const [action,target,by] of [
+    ['profile_approved',owner,'reviewer'],
+    ['song_approved',song,'reviewer'],
+    ['song_hidden',song,'reviewer'],
+    ['song_restored',song,'owner'],
+  ]){
+    assert.ok(entries.some(e=>e.action===action&&e.targetId===target&&e.actor===by),action+' audit entry missing')
+  }
+  const stats=await db.adminOverview()
+  assert.ok(stats.users>=1)
+  assert.ok(stats.publishedSongs>=1)
+  assert.ok(Number.isInteger(stats.pendingReports))
+  await db.deleteAccount(owner)
+  assert.ok((await db.listAudit(50)).every(e=>e.targetId!==owner&&e.targetId!==song))
+})
