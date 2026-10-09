@@ -99,16 +99,40 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
       ])
       return { profiles: profiles.rows, songs: songs.rows }
     },
-    async approveProfile(userId) {
-      const { rows } = await q(`UPDATE community_profiles SET status='verified' WHERE user_id=$1 AND status='pending'
-        RETURNING user_id AS "userId",status`, [userId])
-      return rows[0] || null
+    async approveProfile(userId, actor = 'legacy') {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const { rows } = await client.query(`UPDATE community_profiles SET status='verified'
+          WHERE user_id=$1 AND status='pending'
+          RETURNING user_id AS "userId",status`, [userId])
+        if (!rows.length) { await client.query('ROLLBACK'); return null }
+        await client.query('INSERT INTO community_audit_log(action,target_id,actor) VALUES ($1,$2,$3)',
+          ['profile_approved', userId, actor])
+        await client.query('COMMIT')
+        return rows[0]
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
     },
-    async approveSong(songId) {
-      const { rows } = await q(`UPDATE community_songs s SET status='approved' FROM community_profiles p
-        WHERE s.id=$1 AND s.owner_id=p.user_id AND p.status='verified' AND s.status='pending'
-        RETURNING s.id,s.status`, [songId])
-      return rows[0] || null
+    async approveSong(songId, actor = 'legacy') {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const { rows } = await client.query(`UPDATE community_songs s SET status='approved'
+          FROM community_profiles p
+          WHERE s.id=$1 AND s.owner_id=p.user_id AND p.status='verified'
+            AND s.status='pending' RETURNING s.id,s.status`, [songId])
+        if (!rows.length) { await client.query('ROLLBACK'); return null }
+        await client.query('INSERT INTO community_audit_log(action,target_id,actor) VALUES ($1,$2,$3)',
+          ['song_approved', songId, actor])
+        await client.query('COMMIT')
+        return rows[0]
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally { client.release() }
     },
     async submitSongReport(report) {
       const { rows } = await q(`INSERT INTO community_song_reports(id,song_id,reporter_id,reason,details)
@@ -134,7 +158,7 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         ORDER BY s.created_at DESC LIMIT 100`)
       return rows
     },
-    async moderateSong(songId, action) {
+    async moderateSong(songId, action, actor = 'legacy') {
       if (!['hide', 'restore'].includes(action)) throw new Error('Unsupported moderation action')
       const client = await pool.connect()
       try {
@@ -152,8 +176,8 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
           await client.query(`UPDATE community_song_reports SET status='resolved',reviewed_at=now()
             WHERE song_id=$1 AND status='pending'`, [songId])
         }
-        await client.query('INSERT INTO community_audit_log(action,target_id) VALUES ($1,$2)',
-          [action === 'hide' ? 'song_hidden' : 'song_restored', songId])
+        await client.query('INSERT INTO community_audit_log(action,target_id,actor) VALUES ($1,$2,$3)',
+          [action === 'hide' ? 'song_hidden' : 'song_restored', songId, actor])
         await client.query('COMMIT')
         return rows[0]
       } catch (error) {
@@ -161,7 +185,7 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         throw error
       } finally { client.release() }
     },
-    async dismissReport(reportId) {
+    async dismissReport(reportId, actor = 'legacy') {
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
@@ -170,8 +194,8 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
           WHERE id=$1 AND status='pending'
           RETURNING id,status`, [reportId])
         if (!rows.length) { await client.query('ROLLBACK'); return null }
-        await client.query('INSERT INTO community_audit_log(action,target_id) VALUES ($1,$2)',
-          ['report_dismissed', reportId])
+        await client.query('INSERT INTO community_audit_log(action,target_id,actor) VALUES ($1,$2,$3)',
+          ['report_dismissed', reportId, actor])
         await client.query('COMMIT')
         return rows[0]
       } catch (error) {
@@ -225,8 +249,27 @@ async function createPgStore(connectionString = process.env.DATABASE_URL) {
         throw error
       } finally { client.release() }
     },
-    async addAudit(action, targetId) {
-      await q('INSERT INTO community_audit_log(action,target_id) VALUES ($1,$2)', [action, targetId])
+    async addAudit(action, targetId, actor = 'legacy') {
+      await q('INSERT INTO community_audit_log(action,target_id,actor) VALUES ($1,$2,$3)',
+        [action, targetId, actor])
+    },
+    async listAudit(limit = 50) {
+      const { rows } = await q(`SELECT id,action,target_id AS "targetId",actor,
+        created_at AS "createdAt" FROM community_audit_log
+        ORDER BY created_at DESC,id DESC LIMIT $1`, [Math.min(Math.max(limit, 1), 100)])
+      return rows
+    },
+    async adminOverview() {
+      const { rows } = await q(`SELECT
+        (SELECT count(*)::int FROM community_users) AS "users",
+        (SELECT count(*)::int FROM community_users WHERE email_verified_at IS NOT NULL) AS "verifiedUsers",
+        (SELECT count(*)::int FROM community_profiles WHERE status='pending') AS "pendingProfiles",
+        (SELECT count(*)::int FROM community_songs WHERE status='pending') AS "pendingSongs",
+        (SELECT count(*)::int FROM community_songs WHERE status='approved') AS "publishedSongs",
+        (SELECT count(*)::int FROM community_songs WHERE status='hidden') AS "hiddenSongs",
+        (SELECT count(*)::int FROM community_song_reports WHERE status='pending') AS "pendingReports",
+        (SELECT count(*)::int FROM community_visits) AS "communityVisits"`)
+      return rows[0]
     },
     async ready() {
       const { rows } = await q('SELECT 1 AS ok')

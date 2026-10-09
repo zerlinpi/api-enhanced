@@ -49,6 +49,9 @@ jobs:
       - name: Check syntax
         run: |
           node --check artist-community/server.js
+          node --check artist-community/admin-auth.js
+          node --check artist-community/admin-auth.test.js
+          node --check artist-community/admin-roles.test.js
           node --check artist-community/db.js
           node --check artist-community/rate-limit.js
           node --check artist-community/rate-limit.test.js

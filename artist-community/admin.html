@@ -23,7 +23,9 @@ code{background:#eff2f8;padding:6px;border-radius:6px;overflow-wrap:anywhere}
 <input id="adminToken" type="password" autocomplete="off" placeholder="输入服务端配置的管理员令牌">
 <button id="connect">加载待审核列表</button><button id="clear" class="secondary">清除令牌</button>
 </div><p class="muted">令牌只保存在本页面的运行内存，不写入浏览器存储。请通过 HTTPS、受信网络访问后台。</p>
-<p id="notice" role="status">管理员登录不会改变普通用户的会话。</p></section>
+<p id="notice" role="status">管理员登录不会改变普通用户的会话。</p><p id="staffRole" class="muted">尚未校验权限</p></section>
+<section id="ownerOverview" hidden><h2>运营总览（站点所有者）</h2><div id="overview" class="row">仅站点所有者可查看</div></section>
+<section id="ownerAudit" hidden><h2>最近审核操作记录（最多50条）</h2><p class="muted">仅显示角色标签，使用同一角色令牌时无法区分不同自然人。真实人员追踪需要后续独立工作人员账户。</p><div id="auditEvents"></div></section>
 <section><div class="row"><h2>音乐人认证审核</h2><span id="profileCount" class="counter">—</span></div>
 <p class="muted">核对主页数字 ID、名称及公开简介中的证明码，并确认账号归属后才能批准。</p>
 <div id="profiles">请先加载待审核列表。</div></section>
@@ -41,6 +43,7 @@ code{background:#eff2f8;padding:6px;border-radius:6px;overflow-wrap:anywhere}
 <script>
 const $=id=>document.getElementById(id)
 let adminToken=''
+let staffRole=null
 function el(tag,value){const result=document.createElement(tag);result.textContent=value;return result}
 function notice(message){$('notice').textContent=message}
 async function api(path,method='GET'){
@@ -67,7 +70,28 @@ function entry(container,label,details,link,id,type,canApprove=true){
 }
 async function load(){
  if(!adminToken){notice('请先输入管理员令牌');return}
- const [result,mod]=await Promise.all([api('/api/admin/review'),api('/api/admin/reports')])
+ const identity=await api('/api/admin/me')
+ staffRole=identity.role
+ $('staffRole').textContent='当前权限：'+(staffRole==='owner'?'站点所有者':'审核员')
+ $('ownerOverview').hidden=staffRole!=='owner'
+ $('ownerAudit').hidden=staffRole!=='owner'
+ const requests=[api('/api/admin/review'),api('/api/admin/reports')]
+ if(staffRole==='owner')requests.push(api('/api/admin/overview'),api('/api/admin/audit'))
+ const [result,mod,stats,events]=await Promise.all(requests)
+ if(staffRole==='owner'){
+  const metric=$('overview');metric.replaceChildren()
+  const labels={users:'注册账户',verifiedUsers:'邮箱已验证',pendingProfiles:'待核音乐人',pendingSongs:'待审核歌曲',publishedSongs:'已公开作品',hiddenSongs:'已下架',pendingReports:'待处理举报',communityVisits:'站内账号访问'}
+  for(const [key,label] of Object.entries(labels)){
+   const span=el('span',label+'：'+(stats.overview[key]??'—'))
+   span.className='counter';metric.append(span)
+  }
+  const log=$('auditEvents');log.replaceChildren()
+  for(const event of events.events){
+   const line=el('p',new Date(event.createdAt).toLocaleString()+' · '+event.actor+' · '+event.action+' · '+event.targetId)
+   line.className='muted';log.append(line)
+  }
+  if(!events.events.length)log.append(el('p','暂时没有审核记录'))
+ }
  const profiles=$('profiles'),songs=$('songs')
  profiles.replaceChildren();songs.replaceChildren()
  $('profileCount').textContent=result.profiles.length+' 待审核'
@@ -115,6 +139,8 @@ async function load(){
   article.append(el('strong',song.title+' · '+song.artist))
   const link=el('a','查看网易云作品 ↗');link.href=song.url;link.target='_blank';link.rel='noopener noreferrer';article.append(link)
   const restore=el('button','审核后恢复公开');restore.className='secondary'
+  restore.disabled=staffRole!=='owner'
+  if(staffRole!=='owner')restore.title='仅站点所有者可以恢复已下架作品'
   restore.addEventListener('click',async()=>{
    if(!confirm('已重新核查身份与内容，确定恢复作品公开展示？'))return
    restore.disabled=true
@@ -126,5 +152,5 @@ async function load(){
  notice('审核队列更新成功')
 }
 $('connect').addEventListener('click',()=>{adminToken=$('adminToken').value.trim();$('adminToken').value='';load().catch(error=>notice(error.message))})
-$('clear').addEventListener('click',()=>{adminToken='';$('adminToken').value='';for(const id of ['profiles','songs','reports','hiddenSongs'])$(id).replaceChildren();notice('管理令牌已清除')})
+$('clear').addEventListener('click',()=>{adminToken='';staffRole=null;$('adminToken').value='';for(const id of ['profiles','songs','reports','hiddenSongs','overview','auditEvents'])$(id).replaceChildren();$('ownerOverview').hidden=true;$('ownerAudit').hidden=true;$('staffRole').textContent='尚未校验权限';notice('管理令牌已清除')})
 </script></body></html>
