@@ -7,6 +7,7 @@ const { isIP } = require('node:net')
 const { promisify } = require('node:util')
 const { createPgStore } = require('./db')
 const { createUnavailableMetricsProvider } = require('./official-metrics')
+const { createMemoryRateLimiter, createRedisRateLimiter } = require('./rate-limit')
 
 const scrypt = promisify(crypto.scrypt)
 const PORT = Number(process.env.ARTIST_COMMUNITY_PORT || 3100)
@@ -77,9 +78,8 @@ function guardMutation(req) {
     if (origin !== req.headers.host) fail(403, '禁止跨站请求')
   }
 }
-function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN, trustProxy = process.env.ARTIST_COMMUNITY_TRUST_PROXY === 'true' } = {}) {
+function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN, trustProxy = process.env.ARTIST_COMMUNITY_TRUST_PROXY === 'true', rateLimiter = createMemoryRateLimiter() } = {}) {
   if (!store) throw new Error('store is required')
-  const attempts = new Map()
   function clientIp(req) {
     // Trust forwarded IPs only when the app is reachable exclusively via a
     // proxy configured to OVERWRITE (not append untrusted) X-Forwarded-For.
@@ -108,16 +108,15 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (typeof password !== 'string' || password.length < 12 || password.length > 128) fail(400, '密码必须为 12–128 个字符')
     return password
   }
-  function throttle(req, action, limit, accountId) {
+  async function throttle(req, action, limit, accountId) {
     const key = action + ':' + (accountId ? 'user:' + accountId : 'ip:' + clientIp(req))
-    const now = Date.now()
-    const entry = attempts.get(key)
-    const fresh = !entry || entry.until < now
-    const state = fresh ? { count: 0, until: now + 15 * 60 * 1000 } : entry
-    state.count++
-    if (attempts.size > 10000) attempts.clear()
-    attempts.set(key, state)
-    if (state.count > limit) fail(429, '请求过于频繁，请稍后重试')
+    let allowed
+    try { allowed = await rateLimiter.check(key, limit) }
+    catch {
+      console.error('[artist-community] shared rate limit backend unavailable')
+      fail(503, '请求限制服务暂不可用')
+    }
+    if (!allowed) fail(429, '请求过于频繁，请稍后重试')
   }
   async function userFromRequest(req) {
     const token = readCookie(req)
@@ -153,8 +152,9 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (req.method === 'GET' && route === '/api/health') return reply(200, { ok: true })
     if (req.method === 'GET' && route === '/api/health/ready') {
       try {
-        const ready = await store.ready()
-        return reply(ready ? 200 : 503, { ready: Boolean(ready) })
+        const [databaseReady, limiterReady] = await Promise.all([store.ready(), rateLimiter.ready()])
+        const ready = Boolean(databaseReady && limiterReady)
+        return reply(ready ? 200 : 503, { ready })
       } catch { return reply(503, { ready: false }) }
     }
     if (req.method === 'GET' && route === '/api/auth/providers') {
@@ -188,7 +188,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     }
     if (req.method === 'GET' && route === '/api/account/export') {
       const user = await requireUser(req)
-      throttle(req, 'account-export', 8, user.id)
+      await throttle(req, 'account-export', 8, user.id)
       const data = await store.exportAccount(user.id)
       if (!data) fail(404, '账户不存在')
       return reply(200, data)
@@ -211,7 +211,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (req.method !== 'POST') fail(404, '接口不存在')
     guardMutation(req)
     if (route === '/api/auth/register') {
-      throttle(req, 'register', 5)
+      await throttle(req, 'register', 5)
       const input = await bodyJson(req)
       const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
       const password = input.password
@@ -223,21 +223,21 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       return reply(201, { user: safeUser(user), message: '注册成功，请查收邮箱验证邮件后登录' })
     }
     if (route === '/api/auth/verify-email') {
-      throttle(req, 'email-verification', 20)
+      await throttle(req, 'email-verification', 20)
       const input = await bodyJson(req)
       const ok = await store.consumeAuthToken(validatedToken(input.token), 'email_verification')
       if (!ok) fail(400, '验证链接无效或已过期')
       return reply(200, { ok: true, message: '邮箱验证成功' })
     }
     if (route === '/api/auth/resend-verification') {
-      throttle(req, 'resend-verification', 3, user.id)
       const user = await requireUser(req)
+      await throttle(req, 'resend-verification', 3, user.id)
       await bodyJson(req)
       if (!user.emailVerifiedAt) await sendAccountToken(user, 'email_verification')
       return reply(200, { ok: true, message: '如需验证，已发送新的验证邮件' })
     }
     if (route === '/api/auth/forgot-password') {
-      throttle(req, 'forgot-password', 5)
+      await throttle(req, 'forgot-password', 5)
       const input = await bodyJson(req)
       const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
       if (email.length > 254) fail(400, '邮箱格式无效')
@@ -249,7 +249,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       return reply(200, { message: '如果邮箱已注册，密码重置链接会发送到对应邮箱' })
     }
     if (route === '/api/auth/reset-password') {
-      throttle(req, 'reset-password', 10)
+      await throttle(req, 'reset-password', 10)
       const input = await bodyJson(req)
       const passwordHash = await hashPassword(validatedPassword(input.password))
       const ok = await store.consumeAuthToken(validatedToken(input.token), 'password_reset', passwordHash)
@@ -258,7 +258,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       return reply(200, { ok: true, message: '密码已重置，请重新登录' })
     }
     if (route === '/api/auth/login') {
-      throttle(req, 'login', 10)
+      await throttle(req, 'login', 10)
       const input = await bodyJson(req)
       const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
       const password = input.password
@@ -272,7 +272,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     }
     if (route === '/api/account/logout-all' || route === '/api/account/delete') {
       const user = await requireUser(req)
-      throttle(req, 'account-security', 5, user.id)
+      await throttle(req, 'account-security', 5, user.id)
       const input = await bodyJson(req)
       const password = input.password
       if (typeof password !== 'string' || password.length > 128) fail(403, '密码验证失败')
@@ -300,7 +300,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (route === '/api/profile') {
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
-      throttle(req, 'profile', 5, user.id)
+      await throttle(req, 'profile', 5, user.id)
       const input = await bodyJson(req)
       const name = typeof input.artistName === 'string' ? input.artistName.trim() : ''
       const match = ARTIST_RE.exec(typeof input.url === 'string' ? input.url.trim() : '')
@@ -312,7 +312,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     if (route === '/api/songs') {
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
-      throttle(req, 'songs', 20, user.id)
+      await throttle(req, 'songs', 20, user.id)
       const profile = await store.getProfile(user.id)
       if (!profile) fail(403, '请先绑定音乐人主页')
       const input = await bodyJson(req)
@@ -331,7 +331,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       if (!ID_RE.test(reportMatch[1])) fail(400, '作品 ID 无效')
       const user = await requireUser(req)
       if (!user.emailVerifiedAt) fail(403, '请先验证邮箱')
-      throttle(req, 'song-report', 10, user.id)
+      await throttle(req, 'song-report', 10, user.id)
       const input = await bodyJson(req)
       const reason = input.reason
       const details = typeof input.details === 'string' ? input.details.trim() : ''
@@ -347,7 +347,7 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     const visit = /^\/api\/songs\/([0-9a-f-]{36})\/visits$/i.exec(route)
     if (visit) {
       const user = await requireUser(req)
-      throttle(req, 'visits', 100, user.id)
+      await throttle(req, 'visits', 100, user.id)
       await bodyJson(req)
       if (!ID_RE.test(visit[1])) fail(400, '作品 ID 无效')
       const recorded = await store.recordVisit(visit[1], user.id)
@@ -406,9 +406,20 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
 async function start() {
   const store = await createPgStore()
   const { createMailerFromEnv } = require('./mail')
-  const mailer = createMailerFromEnv()
-  const host = process.env.ARTIST_COMMUNITY_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1')
-  createServer({ store, mailer }).listen(PORT, host, () => console.log('Artist community ready on ' + host + ':' + PORT))
+  try {
+    const mailer = createMailerFromEnv()
+    const redisUrl = process.env.REDIS_URL
+    if (process.env.NODE_ENV === 'production' && !redisUrl) {
+      throw new Error('REDIS_URL is required in production to prevent bypassing shared rate limits')
+    }
+    const rateLimiter = redisUrl ? await createRedisRateLimiter(redisUrl) : createMemoryRateLimiter()
+    const host = process.env.ARTIST_COMMUNITY_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1')
+    createServer({ store, mailer, rateLimiter }).listen(PORT, host,
+      () => console.log('Artist community ready on ' + host + ':' + PORT))
+  } catch (error) {
+    await store.close()
+    throw error
+  }
 }
 if (require.main === module) start().catch(error => { console.error(error); process.exitCode = 1 })
 module.exports = { createServer, hashPassword, verifyPassword, SONG_RE, ARTIST_RE }
