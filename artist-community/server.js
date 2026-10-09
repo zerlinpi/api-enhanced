@@ -8,6 +8,7 @@ const { promisify } = require('node:util')
 const { createPgStore } = require('./db')
 const { createUnavailableMetricsProvider } = require('./official-metrics')
 const { createMemoryRateLimiter, createRedisRateLimiter } = require('./rate-limit')
+const { createAdminAuth } = require('./admin-auth')
 
 const scrypt = promisify(crypto.scrypt)
 const PORT = Number(process.env.ARTIST_COMMUNITY_PORT || 3100)
@@ -63,13 +64,7 @@ function readCookie(req) {
   const match = /(?:^|;\s*)ac_sid=([0-9a-f]{64})(?:;|$)/.exec(req.headers.cookie || '')
   return match ? match[1] : null
 }
-function authAdmin(req, adminToken) {
-  if (!adminToken || adminToken.length < 32) fail(503, '管理端尚未配置')
-  const provided = String(req.headers.authorization || '').replace(/^Bearer /, '')
-  const a = Buffer.from(tokenHash(provided), 'hex')
-  const b = Buffer.from(tokenHash(adminToken), 'hex')
-  if (!crypto.timingSafeEqual(a, b)) fail(403, '无管理权限')
-}
+
 function guardMutation(req) {
   if (req.headers['x-community-request'] !== '1') fail(403, '缺少站内请求标识')
   if (req.headers.origin) {
@@ -78,8 +73,14 @@ function guardMutation(req) {
     if (origin !== req.headers.host) fail(403, '禁止跨站请求')
   }
 }
-function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN, trustProxy = process.env.ARTIST_COMMUNITY_TRUST_PROXY === 'true', rateLimiter = createMemoryRateLimiter() } = {}) {
+function createServer({ store, mailer, metricsProvider = createUnavailableMetricsProvider(), adminToken = process.env.ARTIST_COMMUNITY_ADMIN_TOKEN, reviewerToken = process.env.ARTIST_COMMUNITY_REVIEWER_TOKEN, trustProxy = process.env.ARTIST_COMMUNITY_TRUST_PROXY === 'true', rateLimiter = createMemoryRateLimiter() } = {}) {
   if (!store) throw new Error('store is required')
+  const authorizeAdmin = createAdminAuth({ adminToken, reviewerToken })
+  function requireAdmin(req, role = 'reviewer') {
+    const result = authorizeAdmin(req, role)
+    if (result.error) fail(result.error, result.error === 503 ? '管理端尚未配置' : '无管理权限')
+    return result
+  }
   function clientIp(req) {
     // Trust forwarded IPs only when the app is reachable exclusively via a
     // proxy configured to OVERWRITE (not append untrusted) X-Forwarded-For.
@@ -197,15 +198,28 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
       const user = await requireUser(req)
       return reply(200, { songs: (await store.listMySongs(user.id)).map(publicSong) })
     }
+    if (req.method === 'GET' && route === '/api/admin/me') {
+      const staff = requireAdmin(req)
+      return reply(200, { role: staff.role, canRestore: staff.role === 'owner',
+        canSeeOverview: staff.role === 'owner' })
+    }
+    if (req.method === 'GET' && route === '/api/admin/overview') {
+      requireAdmin(req, 'owner')
+      return reply(200, { overview: await store.adminOverview() })
+    }
+    if (req.method === 'GET' && route === '/api/admin/audit') {
+      requireAdmin(req, 'owner')
+      return reply(200, { events: await store.listAudit(50) })
+    }
     if (req.method === 'GET' && route === '/api/admin/reports') {
-      authAdmin(req, adminToken)
+      requireAdmin(req)
       return reply(200, {
         reports: await store.listPendingReports(),
         hiddenSongs: await store.listHiddenSongs(),
       })
     }
     if (req.method === 'GET' && route === '/api/admin/review') {
-      authAdmin(req, adminToken)
+      requireAdmin(req)
       return reply(200, await store.reviewQueue())
     }
     if (req.method !== 'POST') fail(404, '接口不存在')
@@ -357,37 +371,35 @@ function createServer({ store, mailer, metricsProvider = createUnavailableMetric
     const moderateMatch = /^\/api\/admin\/songs\/([0-9a-f-]{36})\/(hide|restore)$/i.exec(route)
     if (moderateMatch) {
       if (!ID_RE.test(moderateMatch[1])) fail(400, '作品 ID 无效')
-      authAdmin(req, adminToken)
+      const staff = requireAdmin(req, moderateMatch[2] === 'restore' ? 'owner' : 'reviewer')
       await bodyJson(req)
-      const result = await store.moderateSong(moderateMatch[1], moderateMatch[2])
+      const result = await store.moderateSong(moderateMatch[1], moderateMatch[2], staff.actor)
       if (!result) fail(409, '作品不存在或当前状态不允许执行该操作')
       return reply(200, { song: result })
     }
     const dismissMatch = /^\/api\/admin\/reports\/([0-9a-f-]{36})\/dismiss$/i.exec(route)
     if (dismissMatch) {
       if (!ID_RE.test(dismissMatch[1])) fail(400, '举报 ID 无效')
-      authAdmin(req, adminToken)
+      const staff = requireAdmin(req)
       await bodyJson(req)
-      const result = await store.dismissReport(dismissMatch[1])
+      const result = await store.dismissReport(dismissMatch[1], staff.actor)
       if (!result) fail(404, '待处理举报不存在')
       return reply(200, { report: result })
     }
     const approveProfile = /^\/api\/admin\/profiles\/([0-9a-f-]{36})\/approve$/i.exec(route)
     if (approveProfile) {
-      authAdmin(req, adminToken)
+      const staff = requireAdmin(req)
       await bodyJson(req)
-      const profile = await store.approveProfile(approveProfile[1])
+      const profile = await store.approveProfile(approveProfile[1], staff.actor)
       if (!profile) fail(404, '待审核音乐人不存在')
-      await store.addAudit('profile_approved', profile.userId)
       return reply(200, { profile })
     }
     const approveSong = /^\/api\/admin\/songs\/([0-9a-f-]{36})\/approve$/i.exec(route)
     if (approveSong) {
-      authAdmin(req, adminToken)
+      const staff = requireAdmin(req)
       await bodyJson(req)
-      const song = await store.approveSong(approveSong[1])
+      const song = await store.approveSong(approveSong[1], staff.actor)
       if (!song) fail(409, '歌曲不存在、已审核或音乐人尚未认证')
-      await store.addAudit('song_approved', song.id)
       return reply(200, { song })
     }
     fail(404, '接口不存在')
