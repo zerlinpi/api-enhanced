@@ -14,6 +14,7 @@
 - 网易云公开音乐人主页声明、临时证明码、管理员人工核实。
 - 歌曲投稿与审核、响应式用户端和 [可视化审核后台](/admin)（输入管理员密钥，不保存在 localStorage）。
 - PostgreSQL 存储、官方作品链接、站内账号访问去重、优先低曝光未访问作品的推荐。
+- **Redis 共享限流**：生产环境通过私有网络 Redis 原子计数，支持多个 Node 实例共享登录、注册、找回密码、歌曲投稿和访问限额。Redis 不可用时拒绝受限请求，并使 `/api/health/ready` 返回 HTTP 503；开发环境未配置 Redis 时可使用有容量上限的内存限流。
 - `GET /api/official/metrics`：**官方授权数据源扩展点**，默认仅返回 `officialValidPlays: null` 和 `officialTaskStatus: "unavailable"`；未接入任何未经授权的数据接口。
 - 生产 Docker Compose（PostgreSQL + Node.js + Caddy 自动 HTTPS）、手动备份校验脚本、独立 CI 测试。
 
@@ -25,7 +26,7 @@
 
 **网易云音乐账号登录当前未启用**：`GET /api/auth/providers` 会返回明确的未授权状态。官方开发平台确实提供某些需要申请的扫码授权机制，但本站尚未拥有项目对应的授权凭据与正式回调权限。登录仍使用本站邮箱账号，歌曲由用户自行在网易云官方客户端收听。**不实现代管账号或后台挂机互刷播放。**
 
-**健康检测：** `GET /api/health` 仅代表进程存活；`GET /api/health/ready` 会实际查询 PostgreSQL，就绪时返回 `{"ready":true}`，数据库故障时返回 HTTP 503。
+**健康检测：** `GET /api/health` 仅代表进程存活；`GET /api/health/ready` 会检查 PostgreSQL **和限流服务**，两者均正常时返回 `{"ready":true}`，任一故障返回 HTTP 503。
 
 ## 本地运行
 
@@ -40,6 +41,7 @@ export DATABASE_URL='postgres://community:use-a-strong-db-password@127.0.0.1:543
 export ARTIST_COMMUNITY_ADMIN_TOKEN="$(openssl rand -hex 32)"
 export PUBLIC_BASE_URL='http://127.0.0.1:3100'
 export MAIL_MODE=console
+# 可选：若要本地验证多实例限流，先启动 Redis 并 export REDIS_URL=redis://127.0.0.1:6379
 npm start
 ```
 
@@ -140,7 +142,7 @@ npm test
 
 - 邮件发出依赖有效 SMTP 服务和 SPF/DKIM/DMARC；不能保证所有邮件被投递。
 - 已登录用户按账号分别限制提交与访问频率；未登录的注册、登录、密码找回等接口按客户端 IP 限流。部署在 Caddy/Nginx 后时，必须通过可信代理**覆盖** `X-Forwarded-For`，生产 Compose 已设置 `ARTIST_COMMUNITY_TRUST_PROXY=true`，见 [DEPLOYMENT.md](DEPLOYMENT.md)。
-- 当前限制登录/重置频率的计数器为**单 Node 进程内存**，多副本生产部署前应升级 Redis 限流并增加验证码。
+- 生产环境已要求 Redis 分布式限流。开发环境可以使用进程内限流；后续仍应增加验证码、异常登录告警，并按公网压力测试调节限额。Redis 计数不做持久化，重启 Redis 会重置当前限流窗口。
 - 仍需要增加举报/撤回、邮箱修改验证、审核撤销、审计员角色及操作证据、版本化迁移和备份恢复演练。生产环境必须制定备份保留/到期清理政策；即时账户删除不会追溯修改历史备份。
 - 当前身份验证只核对公开证明码，不是网易云授权登录。
 - 官方任务数据接入必须先获得合法授权，并独立取得音乐人的数据读取授权；不能假设第三方逆向接口就等同官方授权。
