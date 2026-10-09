@@ -3,7 +3,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY artist-community/package.json ./
 RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
-COPY artist-community/server.js artist-community/db.js artist-community/mail.js artist-community/official-metrics.js artist-community/rate-limit.js ./
+COPY artist-community/server.js artist-community/db.js artist-community/mail.js artist-community/official-metrics.js artist-community/rate-limit.js artist-community/admin-auth.js ./
 COPY artist-community/index.html artist-community/admin.html artist-community/schema.sql ./
 USER node
 EXPOSE 3100
