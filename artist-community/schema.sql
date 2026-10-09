@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS community_audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Existing audit records retain the legacy actor label after upgrading.
+ALTER TABLE community_audit_log ADD COLUMN IF NOT EXISTS actor text NOT NULL DEFAULT 'legacy';
+CREATE INDEX IF NOT EXISTS community_audit_log_created_idx ON community_audit_log(created_at DESC);
+
 -- Reviewable content moderation: existing pending/approved rows are preserved.
 -- Community moderators can temporarily hide and reinstate previously approved works.
 DO 'BEGIN
