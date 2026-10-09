@@ -8,7 +8,13 @@ function fakeStore() {
   return {
     async createUser(u) { if (users.has(u.email)) { const e = Error(); e.code = '23505'; throw e } users.set(u.email, u); return u },
     async findUserByEmail(email) { return users.get(email) },
-    async saveAuthToken(id, purpose, hash, expiresAt) { tokens.set(hash, { id, purpose, expiresAt }) },
+    async saveAuthToken(id, purpose, hash, expiresAt) {
+      // Match PostgreSQL semantics: replacing a token invalidates earlier links.
+      for (const [oldHash, previous] of tokens) {
+        if (previous.id === id && previous.purpose === purpose) tokens.delete(oldHash)
+      }
+      tokens.set(hash, { id, purpose, expiresAt })
+    },
     async consumeAuthToken(hash, purpose, passwordHash) {
       const token = tokens.get(hash)
       if (!token || token.purpose !== purpose || token.expiresAt < new Date()) return false
