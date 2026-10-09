@@ -15,6 +15,18 @@ services:
       retries: 6
     networks: [internal]
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Rate-limit counters are ephemeral. No public Redis port and no key eviction.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [internal]
+
   app:
     build:
       context: ..
@@ -26,6 +38,7 @@ services:
       ARTIST_COMMUNITY_TRUST_PROXY: 'true'
       ARTIST_COMMUNITY_PORT: 3100
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      REDIS_URL: redis://redis:6379
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
       MAIL_HOST: ${MAIL_HOST:?Set MAIL_HOST}
       MAIL_PORT: ${MAIL_PORT:-587}
@@ -36,6 +49,8 @@ services:
       ARTIST_COMMUNITY_ADMIN_TOKEN: ${ARTIST_COMMUNITY_ADMIN_TOKEN:?Set ARTIST_COMMUNITY_ADMIN_TOKEN}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks: [internal, public]
     read_only: true

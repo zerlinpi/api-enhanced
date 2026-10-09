@@ -27,8 +27,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://community:test-only-password@127.0.0.1:5432/artist_community
+      REDIS_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -40,6 +50,8 @@ jobs:
         run: |
           node --check artist-community/server.js
           node --check artist-community/db.js
+          node --check artist-community/rate-limit.js
+          node --check artist-community/rate-limit.test.js
           node --check artist-community/server.test.js
           node --check artist-community/db.test.js
       - name: Validate production Compose and backup syntax

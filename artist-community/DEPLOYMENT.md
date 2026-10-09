@@ -47,6 +47,17 @@ docker run --rm caddy:2-alpine caddy hash-password --plaintext '独立且足够�
 
 `ADMIN_BASIC_HASH` 的 bcrypt 字符串含有 `$`，请在 Compose env 文件中按其语法转义 `$`（通常每个 `$` 用 `$$`），并使用预检命令校验实际解析结果，不要把原始哈希写进代码库。
 
+## 2.1 Redis 分布式限流
+
+生产 Compose 现在增加**仅在内部 Docker 网络开放**的 Redis 服务（`redis:7-alpine`），并强制将 `REDIS_URL=redis://redis:6379` 传给 Node 应用。这是与 PostgreSQL 不同的短期计数服务：
+
+- 同一账号/IP 的限制对多个 Node 实例共享，Redis Lua 脚本在并发请求下原子计数。
+- Redis 不对公网暴露 6379；没有 Redis 持久化要求，故容器重启会重置限流窗口。
+- Redis 掉线时受限接口**拒绝执行**，`/api/health/ready` 报 503。不能临时改回非共享内存限流当作生产“修复”。
+- 首次部署或更新须确保 Docker 服务健康；单独执行 `bash deploy/compose.sh ps redis` 检查状态。
+
+升级无需数据库表迁移或单独迁移 Redis 数据。服务器仍需留有足够内存，并监测 Redis 的内存/拒绝写入情况。
+
 ## 3. 启动
 
 ```bash
