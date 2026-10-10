@@ -1,246 +1,272 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="独立音乐人作品发现社区">
-<title>云音发现 | 独立音乐人社区</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="独立音乐人提交作品，发现其他人的网易云音乐。">
+<title>云音发现 · 音乐人作品社区</title>
 <style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#18243b;background:#f4f6fb}*{box-sizing:border-box}body{margin:0}button,input,select,textarea{font:inherit}button{cursor:pointer}header{background:linear-gradient(110deg,#111f42,#4055a2 65%,#685aa6);color:white;padding:44px max(22px,calc((100% - 1080px)/2)) 56px}header h1{font-size:clamp(2rem,5vw,3.2rem);margin:0 0 14px}header p{color:#e4e9ff;max-width:600px}main{max-width:1080px;padding:0 20px;margin:-24px auto 64px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.panel{background:white;border-radius:16px;box-shadow:0 12px 32px #192b480d;border:1px solid #e4e9f2;padding:24px;margin-bottom:20px}.panel h2{margin:0 0 15px;font-size:1.2rem}.stack{display:grid;gap:11px}input,select,textarea{width:100%;border:1px solid #cbd4e5;padding:12px;border-radius:9px}button{border:0;border-radius:9px;background:#354eaa;color:white;padding:12px 16px;font-weight:600}button.secondary{background:#edf1fb;color:#304b91}button:disabled{opacity:.5;cursor:not-allowed}small,.muted{color:#67748d;line-height:1.55}a{color:#304ba2}.topline{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.topline h2{margin:0}.song{border:1px solid #e5e9f2;border-radius:11px;padding:15px;display:flex;justify-content:space-between;align-items:center;gap:15px;margin:10px 0}.song strong{display:block}.song small{display:block;margin-top:3px}.song a{white-space:nowrap;text-decoration:none;font-weight:600}.pill{font-size:12px;border-radius:20px;background:#eef2fa;color:#3b5598;padding:5px 9px}.hidden{display:none!important}#notice{position:sticky;top:0;z-index:2;background:#162f59;color:white;padding:10px 20px;text-align:center;min-height:38px}form{display:grid;gap:10px}form button{width:100%}.account{display:flex;gap:10px;align-items:center;flex-wrap:wrap}code{overflow-wrap:anywhere;background:#f2f4fa;padding:5px;border-radius:4px}footer{text-align:center;padding:0 20px 35px;color:#69768c}@media(max-width:700px){.grid{grid-template-columns:1fr}.song{align-items:start;flex-direction:column}header{padding-bottom:56px}.panel{padding:19px}} 
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f4f6fb;color:#17243a}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0}
+header{background:linear-gradient(110deg,#17294b,#4059a8);padding:42px max(22px,calc((100% - 960px)/2)) 64px;color:white}
+header h1{margin:0 0 10px;font-size:clamp(1.9rem,5vw,2.65rem)}
+header p{color:#dfe7ff;margin:0;line-height:1.6}
+main{max-width:960px;margin:-28px auto 55px;padding:0 18px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.panel{border:1px solid #e4e9f2;border-radius:15px;background:white;padding:22px;margin-bottom:18px;box-shadow:0 8px 26px #1529470b}
+h2{margin:0 0 14px;font-size:1.18rem}
+form{display:grid;gap:10px;margin:12px 0}
+input,button,select,textarea{font:inherit}
+input,select,textarea{width:100%;border:1px solid #cbd5e5;border-radius:8px;padding:11px;background:white;color:inherit}
+button{border:0;border-radius:8px;padding:11px 16px;font-weight:600;background:#354fa1;color:white;cursor:pointer}
+button:disabled{opacity:.55;cursor:not-allowed}
+button.secondary{background:#edf1fa;color:#334f93}
+a{color:#31539e}
+small,.muted{font-size:.91rem;line-height:1.6;color:#67758c}
+details{margin:12px 0}summary{cursor:pointer;color:#3e5481}
+.toolbar{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.toolbar h2{margin:0}
+.toolbar button{padding:8px 13px}
+.song{border-top:1px solid #e9edf5;padding:15px 0;display:flex;align-items:center;justify-content:space-between;gap:15px}
+.song:first-child{border-top:0}
+.song strong{display:block}
+.song a{white-space:nowrap;font-weight:600}
+#message{min-height:24px;margin:0 0 12px;color:#244c91}
+#mine{margin-top:14px}
+#mine p{margin:6px 0;font-size:.9rem}
+code{display:block;overflow-wrap:anywhere;margin-top:6px;padding:10px;border-radius:7px;background:#eff2f8}
+footer{text-align:center;padding:0 18px 30px;color:#68758a;font-size:.88rem}
+@media(max-width:700px){.grid{grid-template-columns:1fr}.panel{padding:19px}.song{align-items:start;flex-direction:column}header{padding-bottom:65px}}
 </style>
 </head>
 <body>
-<div id="notice" role="status">欢迎加入真实音乐发现社区</div>
 <header>
-<div class="topline"><span>♫ 云音发现 · Artist Discovery</span><span class="pill">社区测试版</span></div>
-<h1>让好的音乐被更多人听见</h1>
-<p>认识独立创作者，发现新作品。站内访问与网易云官方有效播放是两个不同的指标。</p>
+<h1>云音发现</h1>
+<p>提交你的网易云歌曲，发现其他音乐人的作品。</p>
 </header>
 <main>
+<section class="panel" aria-label="操作提示"><p id="message" role="status">正在加载…</p></section>
 <div class="grid">
 <section class="panel">
-<div class="topline"><h2>我的账户</h2><button id="logout" class="secondary hidden" type="button">退出</button></div>
-<div id="account" class="muted">正在检查登录状态…</div>
-<div class="stack" style="margin-top:12px">
-  <button id="neteaseLogin" class="secondary" disabled type="button">网易云音乐授权登录 · 暂未开放</button>
-  <small id="neteaseStatus">正在检查官方授权接入条件…</small>
-</div>
-<button id="resend" class="secondary hidden" type="button">重新发送验证邮件</button>
-<div id="authForms" class="stack hidden">
-<form id="loginForm"><strong>登录</strong><input name="email" type="email" autocomplete="email" placeholder="邮箱" required><input name="password" type="password" autocomplete="current-password" placeholder="密码" required><button>登录</button></form>
-<hr style="width:100%;border:0;border-top:1px solid #e6ebf5">
-<form id="registerForm"><strong>创建新账户</strong><input name="email" type="email" autocomplete="email" placeholder="邮箱" required><input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="密码（至少12位）" required><button class="secondary">注册</button></form>
-</div>
-<div id="accountControls" class="stack hidden" style="margin-top:18px">
-  <strong>我的账户与隐私</strong>
-  <button id="downloadAccountData" type="button" class="secondary">导出我的账户数据（JSON）</button>
-  <form id="logoutAllForm">
-    <input name="password" type="password" autocomplete="current-password" placeholder="输入本站密码以退出所有设备" required>
-    <button type="submit" class="secondary">退出所有登录设备</button>
-  </form>
-  <details>
-    <summary style="cursor:pointer">永久注销我的账户</summary>
-    <p class="muted">这将删除本站账户、音乐人档案、上传作品和站内访问记录。网易云账户不受影响。数据库备份可能会在既定保留期内继续存在。</p>
-    <form id="deleteAccountForm">
-      <input name="password" type="password" autocomplete="current-password" placeholder="输入本站密码确认身份" required>
-      <input name="confirmation" type="text" autocomplete="off" placeholder="输入大写 DELETE 确认永久注销" required>
-      <button type="submit" style="background:#a82e39">永久注销账户</button>
+  <div class="toolbar"><h2>1. 登录</h2><button id="logout" type="button" class="secondary" hidden>退出登录</button></div>
+  <p id="account" class="muted"></p>
+  <div id="guest">
+    <form id="loginForm">
+      <input type="email" name="email" autocomplete="email" placeholder="邮箱" required>
+      <input type="password" name="password" autocomplete="current-password" placeholder="密码" required>
+      <button type="submit">登录</button>
     </form>
-  </details>
-</div>
-<div class="stack" style="margin-top:18px">
-<form id="verifyForm" class="hidden"><strong>完成邮箱验证</strong><input name="token" id="verifyToken" autocomplete="off" placeholder="验证邮件中的一次性令牌" required><button>验证邮箱</button></form>
-<form id="forgotForm"><strong>忘记密码？</strong><input name="email" type="email" autocomplete="email" placeholder="注册时使用的邮箱" required><button class="secondary">发送重置邮件</button></form>
-<form id="resetForm" class="hidden"><strong>设置新密码</strong><input name="token" id="resetToken" autocomplete="off" placeholder="邮件中的重置令牌" required><input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="新密码（至少12位）" required><button>确认重置密码</button></form>
-</div>
+    <details><summary>没有账号？注册</summary>
+      <form id="registerForm">
+        <input type="email" name="email" autocomplete="email" placeholder="邮箱" required>
+        <input type="password" name="password" minlength="12" autocomplete="new-password" placeholder="设置密码（至少12位）" required>
+        <button type="submit" class="secondary">注册账号</button>
+      </form>
+    </details>
+    <details><summary>忘记密码</summary>
+      <form id="forgotForm"><input type="email" name="email" autocomplete="email" placeholder="注册邮箱" required><button type="submit" class="secondary">发送重置邮件</button></form>
+    </details>
+  </div>
+  <div id="signedIn" hidden>
+    <button id="resend" class="secondary" type="button" hidden>重新发送验证邮件</button>
+    <details><summary>账号设置</summary>
+      <button id="export" type="button" class="secondary">导出账户数据</button>
+      <form id="logoutAllForm"><input type="password" name="password" autocomplete="current-password" placeholder="本站密码" required><button type="submit" class="secondary">退出所有设备</button></form>
+      <details><summary>永久注销账户</summary>
+        <p class="muted">只删除本站在线数据库中的账号和作品。历史备份可能在保留期内继续存在；网易云账号不受影响。</p>
+        <form id="deleteForm"><input type="password" name="password" autocomplete="current-password" placeholder="本站密码" required><input name="confirmation" placeholder="输入大写 DELETE" required><button type="submit">确认注销账户</button></form>
+      </details>
+    </details>
+  </div>
+  <form id="verifyForm" hidden>
+    <strong>确认注册邮箱</strong>
+    <input id="verifyToken" name="token" autocomplete="off" required>
+    <button type="submit">完成邮箱验证</button>
+  </form>
+  <form id="resetForm" hidden>
+    <strong>设置新密码</strong>
+    <input id="resetToken" name="token" autocomplete="off" required>
+    <input type="password" name="password" minlength="12" autocomplete="new-password" required>
+    <button type="submit">重置密码</button>
+  </form>
+  <p class="muted">网易云官方第三方登录尚未开放；本站暂使用邮箱登录。无需提供网易云密码或 Cookie。</p>
 </section>
 <section class="panel">
-<h2>音乐人主页认证</h2>
-<div id="profileInfo" class="muted">登录后可申请关联网易云音乐人主页。</div>
-<form id="profileForm" class="hidden">
-<input name="artistName" maxlength="80" placeholder="网易云音乐人名称" required>
-<input name="url" type="url" placeholder="https://music.163.com/artist?id=..." required>
-<button>提交认证申请</button>
-</form>
-<small>提交后将获得一次性公开证明码。请将它临时放入音乐人主页简介，管理员核对后进行社区认证。认证不代表网易云官方授权。</small>
-</section>
-</div>
-<div class="grid">
-<section class="panel">
-<h2>提交我的作品</h2>
-<form id="songForm">
-<input name="title" maxlength="100" placeholder="歌曲名称" required>
-<input name="url" type="url" placeholder="https://music.163.com/song?id=..." required>
-<button id="submitSong">申请收录作品</button>
-</form>
-<p class="muted">需要先登录并绑定音乐人主页。作品经审核后出现在发现大厅。</p>
-<div id="mySongs"></div>
-</section>
-<section class="panel">
-<h2>会员任务与统计</h2>
-<div class="stack">
-<div>网易云官方有效播放：<strong id="officialPlays">未接入</strong></div>
-<div>会员任务完成状态：<strong id="officialTask">未验证</strong></div>
-<div>社区收录作品：<strong id="songCount">—</strong></div>
-</div>
-<p class="muted">当前仅统计平台注册用户的作品访问，不保证是网易云有效播放，也不能认定为600名独立自然人。</p>
+  <h2>2. 提交歌曲</h2>
+  <p id="profileStatus" class="muted">登录后即可登记网易云音乐人主页。</p>
+  <form id="profileForm" hidden>
+    <input name="artistName" maxlength="80" placeholder="音乐人名称" required>
+    <input name="url" type="url" placeholder="https://music.163.com/artist?id=..." required>
+    <button type="submit">登记音乐人主页</button>
+  </form>
+  <form id="songForm" hidden>
+    <input name="title" maxlength="100" placeholder="歌曲名称" required>
+    <input name="url" type="url" placeholder="https://music.163.com/song?id=..." required>
+    <button type="submit">提交歌曲</button>
+  </form>
+  <p id="songHelp" class="muted">登录并验证邮箱后可以提交作品，公开展示需要人工核对。</p>
+  <div id="mine"></div>
 </section>
 </div>
 <section class="panel">
-<div class="topline"><h2>发现新作品</h2><button id="reload" class="secondary">刷新</button></div>
-<p class="muted">登录后优先推荐未访问过的其他音乐人作品，并照顾曝光较少的作品。此为内容发现推荐，不代表官方播放任务。</p>
-<div id="songs">正在加载作品…</div>
+  <div class="toolbar"><h2>3. 发现歌曲</h2><button id="refresh" class="secondary" type="button">刷新</button></div>
+  <p class="muted">点击歌曲后将在网易云官方页面收听。本站的访问或点击不等于网易云认可的有效播放。</p>
+  <div id="songs">正在加载作品…</div>
 </section>
 </main>
-<footer>不收集网易云密码或 Cookie · 不自动播放 · 任务状态请以网易云音乐人中心为准</footer>
+<footer>仅提供真实作品发现 · 无自动播放与后台代挂 · <a href="/admin">管理员入口</a></footer>
 <script>
+'use strict'
 const $ = id => document.getElementById(id)
-let currentUser = null, currentProfile = null
-function notice(message){$('notice').textContent=message}
-async function api(path, options = {}){
- const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json','X-Community-Request':'1',...(options.headers||{})}})
- const data=await response.json()
- if(!response.ok)throw Error(data.error||'请求失败')
- return data
-}
-function post(path,body={}){return api(path,{method:'POST',body:JSON.stringify(body)})}
-function el(tag,text){const result=document.createElement(tag);result.textContent=text;return result}
-function formData(form){return Object.fromEntries(new FormData(form))}
-async function refreshAccount(){
- const data=await api('/api/auth/me');currentUser=data.user
- $('authForms').classList.toggle('hidden',!!currentUser)
- $('logout').classList.toggle('hidden',!currentUser)
- $('account').textContent=currentUser?'已登录：'+currentUser.email+(currentUser.emailVerified?' · 邮箱已验证':' · 邮箱未验证'):'尚未登录。注册并完成邮箱验证后可申请音乐人认证。'
- $('resend').classList.toggle('hidden',!currentUser||currentUser.emailVerified)
- $('accountControls').classList.toggle('hidden',!currentUser)
- if(!currentUser){currentProfile=null;$('profileInfo').textContent='请先登录。';$('profileForm').classList.add('hidden');$('mySongs').replaceChildren();return}
- const [profile, mine]=await Promise.all([api('/api/profile'),api('/api/my/songs')])
- currentProfile=profile.profile
- $('profileForm').classList.toggle('hidden',!!currentProfile||!currentUser.emailVerified)
- if(!currentUser.emailVerified && !currentProfile){$('profileInfo').textContent='请先完成邮箱验证，才能提交音乐人主页。'}
- if(currentProfile){
-  const info=$('profileInfo');info.replaceChildren()
-  info.append(el('p','音乐人：'+currentProfile.artistName+' · '+(currentProfile.status==='verified'?'社区已验证':'待人工验证')))
-  if(currentProfile.status!=='verified'){info.append(el('p','将以下证明码暂时写入网易云公开主页简介：'),el('code',currentProfile.proofCode))}
- }else{$('profileInfo').textContent='尚未关联音乐人主页。'}
- const holder=$('mySongs');holder.replaceChildren()
- if(mine.songs.length){holder.append(el('h3','我的作品'));for(const song of mine.songs)holder.append(el('p',song.title+' · '+(song.status==='approved'?'已公开':'待审核')))}
-}
-async function refreshSongs(){
- const published=await api('/api/songs')
- const data=currentUser?await api('/api/recommendations'):published
- $('songCount').textContent=String(published.songs.length)
- const list=$('songs');list.replaceChildren()
- if(!data.songs.length){list.append(el('p',currentUser?'暂时没有未浏览过的其他音乐人作品。':'暂无通过审核的作品。'));return}
- for(const song of data.songs){
-  const card=el('div','');card.className='song'
-  const info=el('div','');info.append(el('strong',song.title),el('small',song.artist+' · 站内账号访问 '+song.communityVisitors))
-  const a=el('a','前往网易云收听 ↗');a.href=song.url;a.target='_blank';a.rel='noopener noreferrer'
-  a.addEventListener('click',()=>{
-   if(currentUser)post('/api/songs/'+song.id+'/visits').then(refreshSongs).catch(error=>notice(error.message))
-   else notice('可以直接前往网易云收听；登录后才能记录站内首次访问')
+let me = null
+let ownIds = new Set()
+
+function message(value){$('message').textContent=value}
+function element(tag,value){const item=document.createElement(tag);item.textContent=value;return item}
+async function api(url,options={}){
+  const response=await fetch(url,{
+    credentials:'same-origin',
+    ...options,
+    headers:{'Content-Type':'application/json','X-Community-Request':'1',...(options.headers||{})},
   })
-  card.append(info,a)
-  if(currentUser){
-   const reportBox=document.createElement('details')
-   const summary=el('summary','举报此作品（人工审核）')
-   summary.style.cursor='pointer'
-   const form=document.createElement('form')
-   const reason=document.createElement('select')
-   reason.name='reason'
-   for(const [code,label] of [['copyright','版权或侵权'],['impersonation','冒用音乐人身份'],['spam','垃圾或恶意内容'],['other','其他问题']]){
-    const option=document.createElement('option')
-    option.value=code;option.textContent=label;reason.append(option)
-   }
-   const details=document.createElement('textarea')
-   details.name='details';details.maxLength=500;details.rows=2
-   details.placeholder='可补充说明（最多500字）'
-   const button=el('button','提交举报');button.type='submit';button.className='secondary'
-   form.append(reason,details,button)
-   form.addEventListener('submit',async event=>{
+  const data=await response.json()
+  if(!response.ok)throw Error(data.error||'请求失败')
+  return data
+}
+const post=(url,body={})=>api(url,{method:'POST',body:JSON.stringify(body)})
+const values=form=>Object.fromEntries(new FormData(form))
+function form(id,url,onSuccess){
+  $(id).addEventListener('submit',async event=>{
     event.preventDefault()
+    const target=event.currentTarget
+    const button=target.querySelector('button[type=submit]')
     button.disabled=true
     try{
-     await post('/api/songs/'+song.id+'/reports',{reason:reason.value,details:details.value})
-     notice('举报已提交，管理员会人工审核。')
-     reportBox.remove()
-    }catch(error){notice(error.message);button.disabled=false}
-   })
-   reportBox.append(summary,form);card.append(reportBox)
+      const result=await post(url,values(target))
+      target.reset()
+      await onSuccess(result)
+    }catch(error){message(error.message)}
+    finally{button.disabled=false}
+  })
+}
+async function refreshAccount(){
+  const session=await api('/api/auth/me')
+  me=session.user
+  $('guest').hidden=!!me
+  $('signedIn').hidden=!me
+  $('logout').hidden=!me
+  $('resend').hidden=!me||me.emailVerified
+  $('account').textContent=me?'已登录：'+me.email+(me.emailVerified?'（邮箱已验证）':'（请先验证邮箱）'):'使用本站邮箱登录或注册。'
+  $('profileForm').hidden=true
+  $('songForm').hidden=true
+  ownIds=new Set()
+  $('mine').replaceChildren()
+  if(!me){
+    $('profileStatus').textContent='请先登录，再登记音乐人和歌曲。'
+    $('songHelp').textContent=''
+    return
   }
-  list.append(card)
- }
+  if(!me.emailVerified){
+    $('profileStatus').textContent='请先完成邮箱验证，才能登记音乐人。'
+    $('songHelp').textContent=''
+    return
+  }
+  const [profileResult,songResult]=await Promise.all([api('/api/profile'),api('/api/my/songs')])
+  const profile=profileResult.profile
+  ownIds=new Set(songResult.songs.map(song=>song.id))
+  if(!profile){
+    $('profileStatus').textContent='先登记你的网易云音乐人公开主页。'
+    $('profileForm').hidden=false
+  }else{
+    const status=$('profileStatus')
+    status.replaceChildren()
+    status.append(element('span','音乐人：'+profile.artistName+'（'+(profile.status==='verified'?'已核对':'等待核对')+'）'))
+    if(profile.status!=='verified'){
+      status.append(element('span',' 请将此证明码临时放入网易云音乐人公开主页简介：'))
+      status.append(element('code',profile.proofCode))
+    }
+    $('songForm').hidden=false
+  }
+  $('songHelp').textContent='作品提交后需要人工核对才会公开。'
+  if(songResult.songs.length){
+    const holder=$('mine')
+    holder.append(element('strong','我的歌曲'))
+    for(const song of songResult.songs){
+      const state=song.status==='approved'?'已公开':song.status==='hidden'?'已下架':'待核对'
+      holder.append(element('p',song.title+' · '+state))
+    }
+  }
 }
-function attachForm(id,route,after){
- $(id).addEventListener('submit',async event=>{
+async function refreshSongs(){
+  const data=await api('/api/songs')
+  const list=$('songs')
+  list.replaceChildren()
+  const songs=data.songs.filter(song=>!ownIds.has(song.id))
+  if(!songs.length){
+    list.append(element('p','暂时没有可发现的其他音乐人作品。'))
+    return
+  }
+  for(const song of songs){
+    const card=element('article','');card.className='song'
+    const info=element('div','')
+    info.append(element('strong',song.title),element('small',song.artist))
+    const link=element('a','网易云收听 ↗')
+    link.href=song.url;link.target='_blank';link.rel='noopener noreferrer'
+    card.append(info,link)
+    list.append(card)
+  }
+}
+async function refresh(){
+  await refreshAccount()
+  await refreshSongs()
+}
+form('loginForm','/api/auth/login',async()=>{await refresh();message('登录成功')})
+form('registerForm','/api/auth/register',async()=>{message('注册成功，请检查邮箱中的验证邮件。')})
+form('profileForm','/api/profile',async()=>{await refresh();message('音乐人主页已登记')})
+form('songForm','/api/songs',async()=>{await refresh();message('歌曲已提交，等待人工核对')})
+form('verifyForm','/api/auth/verify-email',async()=>{$('verifyForm').hidden=true;await refresh();message('邮箱验证成功')})
+form('forgotForm','/api/auth/forgot-password',async()=>{message('如果该邮箱已注册，重置链接将发送到邮箱。')})
+form('resetForm','/api/auth/reset-password',async()=>{$('resetForm').hidden=true;await refresh();message('密码已更新，请重新登录')})
+form('logoutAllForm','/api/account/logout-all',async()=>{await refresh();message('已退出所有设备')})
+$('deleteForm').addEventListener('submit',async event=>{
   event.preventDefault()
-  const form=event.currentTarget
-  try{await post(route,formData(form));form.reset();notice('操作成功');await after()}
-  catch(error){notice(error.message)}
- })
-}
-attachForm('registerForm','/api/auth/register',async()=>{notice('注册成功。请查收验证邮件，登录后完成邮箱验证。');await refreshAccount()})
-attachForm('loginForm','/api/auth/login',async()=>{await refreshAccount();await refreshSongs();await refreshMetrics()})
-attachForm('profileForm','/api/profile',refreshAccount)
-attachForm('songForm','/api/songs',async()=>{await refreshAccount();await refreshSongs()})
-attachForm('verifyForm','/api/auth/verify-email',async()=>{ $('verifyForm').classList.add('hidden');await refreshAccount();notice('邮箱验证成功。') })
-attachForm('forgotForm','/api/auth/forgot-password',async()=>notice('如果邮箱已注册，重置链接会发送到对应邮箱。'))
-attachForm('resetForm','/api/auth/reset-password',async()=>{ $('resetForm').classList.add('hidden');await refreshAccount();notice('密码已重置。请重新登录。') })
-$('resend').addEventListener('click',async()=>{try{await post('/api/auth/resend-verification');notice('验证邮件已发送。')}catch(error){notice(error.message)}})
-async function refreshMetrics(){
- if(!currentUser){$('officialPlays').textContent='未接入';$('officialTask').textContent='未验证';return}
- const data=await api('/api/official/metrics')
- $('officialPlays').textContent=data.officialValidPlays===null?'未接入':String(data.officialValidPlays)
- $('officialTask').textContent=data.officialTaskStatus==='unavailable'?'未验证':data.officialTaskStatus
-}
-const linkParams=new URLSearchParams(location.hash.slice(1))
-if(linkParams.has('verify')){$('verifyToken').value=linkParams.get('verify');$('verifyForm').classList.remove('hidden')}
-if(linkParams.has('reset')){$('resetToken').value=linkParams.get('reset');$('resetForm').classList.remove('hidden')}
-if(linkParams.has('verify')||linkParams.has('reset'))history.replaceState(null,'',location.pathname+location.search)
-$('downloadAccountData').addEventListener('click',async()=>{
- try{
-  const data=await api('/api/account/export')
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'})
-  const address=URL.createObjectURL(blob)
-  const link=document.createElement('a')
-  link.href=address;link.download='artist-community-account-export.json'
-  link.click()
-  setTimeout(()=>URL.revokeObjectURL(address),2000)
-  notice('数据文件已生成。请妥善保管，其中包含账户和作品信息。')
- }catch(error){notice(error.message)}
+  const target=event.currentTarget
+  const data=values(target)
+  if(data.confirmation!=='DELETE'){message('请准确输入大写 DELETE');return}
+  if(!confirm('确认永久删除本站账户及其作品？'))return
+  try{
+    await post('/api/account/delete',data)
+    target.reset()
+    await refresh()
+    message('本站账户已注销')
+  }catch(error){message(error.message)}
 })
-$('logoutAllForm').addEventListener('submit',async event=>{
- event.preventDefault()
- const form=event.currentTarget
- try{
-  await post('/api/account/logout-all',formData(form))
-  form.reset()
-  await refreshAccount();await refreshSongs();await refreshMetrics()
-  notice('已退出所有设备。')
- }catch(error){notice(error.message)}
+$('logout').addEventListener('click',async()=>{
+  try{await post('/api/auth/logout');await refresh();message('已退出登录')}
+  catch(error){message(error.message)}
 })
-$('deleteAccountForm').addEventListener('submit',async event=>{
- event.preventDefault()
- const form=event.currentTarget
- const data=formData(form)
- if(data.confirmation!=='DELETE'){notice('请准确输入大写 DELETE');return}
- if(!confirm('最后确认：永久删除本站账户及全部关联数据？此操作不能撤销。'))return
- try{
-  await post('/api/account/delete',data)
-  form.reset()
-  await refreshAccount();await refreshSongs();await refreshMetrics()
-  notice('账号已注销。网易云音乐账号不受影响。')
- }catch(error){notice(error.message)}
+$('resend').addEventListener('click',async()=>{
+  try{await post('/api/auth/resend-verification');message('验证邮件已重新发送')}
+  catch(error){message(error.message)}
 })
-$('logout').addEventListener('click',async()=>{try{await post('/api/auth/logout');await refreshAccount();await refreshSongs();notice('已退出登录')}catch(error){notice(error.message)}})
-$('reload').addEventListener('click',()=>refreshSongs().catch(error=>notice(error.message)))
-async function refreshLoginProviders(){
- try {
-  const providers=await api('/api/auth/providers')
-  $('neteaseStatus').textContent=providers.netease.available?'网易云官方授权已可用':'网易云单点登录尚未取得正式接入许可。当前请使用平台邮箱登录，在网易云官方客户端自主收听。'
-  $('neteaseLogin').disabled=true
- }catch(error){$('neteaseStatus').textContent='网易云授权状态暂时无法查询'}
-}
-refreshLoginProviders()
-refreshAccount().then(()=>Promise.all([refreshSongs(),refreshMetrics()])).catch(error=>notice(error.message))
+$('export').addEventListener('click',async()=>{
+  try{
+    const data=await api('/api/account/export')
+    const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}))
+    const link=document.createElement('a')
+    link.href=url;link.download='my-artist-community-data.json';link.click()
+    setTimeout(()=>URL.revokeObjectURL(url),2000)
+    message('已生成个人数据文件，请妥善保存')
+  }catch(error){message(error.message)}
+})
+$('refresh').addEventListener('click',()=>refreshSongs().catch(error=>message(error.message)))
+const tokens=new URLSearchParams(location.hash.slice(1))
+if(tokens.has('verify')){$('verifyToken').value=tokens.get('verify');$('verifyForm').hidden=false}
+if(tokens.has('reset')){$('resetToken').value=tokens.get('reset');$('resetForm').hidden=false}
+if(tokens.has('verify')||tokens.has('reset'))history.replaceState(null,'',location.pathname+location.search)
+refresh().then(()=>message('可以开始发现音乐了')).catch(error=>message(error.message))
 </script>
-</body></html>
+</body>
+</html>
